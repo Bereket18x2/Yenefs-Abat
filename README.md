@@ -162,7 +162,7 @@ yenefs_abat/
     <td align="center">
       <b>Bereket Elias</b><br/>
       <sub>Developer & Designer</sub><br/>
-      <a href="https://github.com/BelaElias">@BelaElias</a>
+      <a href="https://github.com/Bek18x2">@Bek18x2</a>
     </td>
   </tr>
 </table>
