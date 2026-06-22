@@ -129,9 +129,7 @@ class EthiopianCalendar {
   static int daysInYear(int y) => isLeapYear(y) ? 366 : 365;
   static int dayOfYear(int d, int m, int y) {
     int t = 0;
-    for (int i = 1; i < m; i++) {
-      t += daysInMonth(i, y);
-    }
+    for (int i = 1; i < m; i++) t += daysInMonth(i, y);
     return t + d;
   }
   static EthiopianDate fromGregorian(DateTime g) {
@@ -477,7 +475,7 @@ class _SignInScreenState extends State<SignInScreen> {
     final contactMatch = profile.contact.trim().toLowerCase() == contact.toLowerCase();
 
     if (!contactMatch) {
-      _showError('No account found with that phone/email. You registered with: ${profile.contact}');
+      _showError('No account found with that phone/email. You registered with: ' + profile.contact);
       return;
     }
 
@@ -1009,7 +1007,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           backgroundColor: c.card,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: Text(label, style: TextStyle(color: c.text, fontWeight: FontWeight.w700)),
-          content: Text('Current: $current. What would you like to do?', style: TextStyle(color: c.muted, fontSize: 13)),
+          content: Text('Current: ' + current + '. What would you like to do?', style: TextStyle(color: c.muted, fontSize: 13)),
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx, 'remove'), child: Text('Remove', style: TextStyle(color: c.red))),
             TextButton(onPressed: () => Navigator.pop(ctx, 'cancel'), child: Text('Cancel', style: TextStyle(color: c.muted))),
@@ -1052,7 +1050,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     if (picked != null) {
       final h = picked.hour.toString().padLeft(2, '0');
       final m = picked.minute.toString().padLeft(2, '0');
-      onSave('$h:$m');
+      onSave(h + ':' + m);
     }
   }
 
@@ -1280,7 +1278,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           builder: (_) => SaintStoryScreen(
             isDark: widget.isDark,
             feastName: todayFeast?.name ?? 'No feast today',
-            dateLabel: '${_today.monthNameAmharic} ${_today.day}, ${_today.year}',
+            dateLabel: _today.monthNameAmharic + ' ' + _today.day.toString() + ', ' + _today.year.toString(),
             isAnnual: isAnnual,
             story: synaxarium?.fullStory,
           ),
@@ -1310,7 +1308,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
               ),
               const SizedBox(height: 4),
               Text(
-                '${_today.monthNameAmharic} ${_today.day}, ${_today.year}',
+                _today.monthNameAmharic + ' ' + _today.day.toString() + ', ' + _today.year.toString(),
                 style: TextStyle(fontSize: 12, color: c.muted, fontStyle: FontStyle.italic),
               ),
               if (isAnnual) ...[
@@ -1379,9 +1377,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
               GestureDetector(
                 onTap: () => _showTimeDialog(label, time, (newTime) async {
                   setState(() {
-                    if (key == 'prayer_morning') {
-                      _morningTime = newTime;
-                    } else if (key == 'prayer_noon') _noonTime = newTime;
+                    if (key == 'prayer_morning') _morningTime = newTime;
+                    else if (key == 'prayer_noon') _noonTime = newTime;
                     else if (key == 'prayer_evening') _eveningTime = newTime;
                     else _nightTime = newTime;
                   });
@@ -1627,9 +1624,7 @@ class _ConfessScreenState extends State<ConfessScreen> with SingleTickerProvider
     await prefs.remove('confession_saved_at');
     await prefs.setString('last_confession', now.toIso8601String());
     setState(() {
-      for (int i = 0; i < sins.length; i++) {
-        _checked[i] = false;
-      }
+      for (int i = 0; i < sins.length; i++) _checked[i] = false;
       _saved = false; _savedAt = null;
     });
     if (!mounted) return;
@@ -1651,9 +1646,7 @@ class _ConfessScreenState extends State<ConfessScreen> with SingleTickerProvider
     await prefs.setBool('confession_saved', false);
     await prefs.remove('confession_saved_at');
     setState(() {
-      for (int i = 0; i < sins.length; i++) {
-        _checked[i] = false;
-      }
+      for (int i = 0; i < sins.length; i++) _checked[i] = false;
       _saved = false; _savedAt = null;
     });
   }
@@ -2171,46 +2164,1471 @@ class SynaxariumEntry {
 
 final Map<String, SynaxariumEntry> synaxariumStories = {
   '1-1': SynaxariumEntry(
-    snippet: 'እንቁጣጣሽ የኢትዮጵያ አዲስ ዓመት መታሰቢያ ነው፣ እንዲሁም የቅዱስ ዮሐንስ መጥምቅ ልደት ይከበራል።',
-    fullStory: 'መስከረም 1 የኢትዮጵያ ዘመን አቆጣጠር አዲስ ዓመት መጀመሪያ ነው። በዚህ ቀን ቅዱስ ዮሐንስ መጥምቅ የተወለደበት ቀንም ይታሰባል። ቅዱስ ዮሐንስ የጌታችን ኢየሱስ ክርስቶስ መንገድ ጠራጊ ሆኖ፣ ንስሐን እና የልብ ለውጥን ሲሰብክ ኖረ። እንቁጣጣሽ የምትለው ቃል ራሷ ንግሥት ሳባ ከጉብኝቷ ስትመለስ የተሰጣት ስጦታ ታሪክ ጋር ይያያዛል ይባላል። ይህ ቀን አበቦች የሚታደሱበት፣ ቤተሰብ የሚሰበሰብበት እና አዲስ ተስፋ የሚታቀድበት ነው።',
+    snippet: 'የዘመን መለወጫ በዓል፤ መጥምቁ ዮሐንስ የጌታን መንገድ ለመጥረግ በምድረ በዳ የጮኸበትን ስብከትና አዲስ ዘመንን ማሰብ።',
+    fullStory: 'የዘመን መለወጫ በዓል፤ መጥምቁ ዮሐንስ የጌታን መንገድ ለመጥረግ በምድረ በዳ የጮኸበትን ስብከትና አዲስ ዘመንን ማሰብ።',
+  ),
+  '1-2': SynaxariumEntry(
+    snippet: 'መጥምቁ ዮሐንስ በሄሮድስ እጅ አንገቱ የተሰየመበትና ስለ እውነት ሰማዕት የሆነበት ዕለት።',
+    fullStory: 'መጥምቁ ዮሐንስ በሄሮድስ እጅ አንገቱ የተሰየመበትና ስለ እውነት ሰማዕት የሆነበት ዕለት።',
+  ),
+  '1-3': SynaxariumEntry(
+    snippet: 'እመቤታችን በሦስት ዓመቷ ወደ ቤተ መቅደስ የገባችበት ወርሃዊ መታሰቢያ።',
+    fullStory: 'እመቤታችን በሦስት ዓመቷ ወደ ቤተ መቅደስ የገባችበት ወርሃዊ መታሰቢያ።',
+  ),
+  '1-4': SynaxariumEntry(
+    snippet: 'የፍቅር ሐዋርያና ወንጌላዊው ቅዱስ ዮሐንስ ያሳየው ረቂቅ ሥነ-መለኮትና ተጋድሎ።',
+    fullStory: 'የፍቅር ሐዋርያና ወንጌላዊው ቅዱስ ዮሐንስ ያሳየው ረቂቅ ሥነ-መለኮትና ተጋድሎ።',
+  ),
+  '1-5': SynaxariumEntry(
+    snippet: 'ጻድቁ አባታችን በምድረ በዳ የኖሩት የቅድስና ሕይወትና ለፍጥረት ያሳዩት ታላቅ ርኅራኄ።',
+    fullStory: 'ጻድቁ አባታችን በምድረ በዳ የኖሩት የቅድስና ሕይወትና ለፍጥረት ያሳዩት ታላቅ ርኅራኄ።',
+  ),
+  '1-6': SynaxariumEntry(
+    snippet: 'ቅድስት ቤተሰብ በስደት ዘመን በግብፅ ቁስቋም ተራራ ያረፉበት ወርሃዊ መታሰቢያ።',
+    fullStory: 'ቅድስት ቤተሰብ በስደት ዘመን በግብፅ ቁስቋም ተራራ ያረፉበት ወርሃዊ መታሰቢያ።',
+  ),
+  '1-7': SynaxariumEntry(
+    snippet: 'የአብ፣ የወልድ፣ የመንፈስ ቅዱስ አንድነትና ሦስትነት የሚመሰገንበት ታላቅ ዕለት።',
+    fullStory: 'የአብ፣ የወልድ፣ የመንፈስ ቅዱስ አንድነትና ሦስትነት የሚመሰገንበት ታላቅ ዕለት።',
+  ),
+  '1-8': SynaxariumEntry(
+    snippet: 'በትሕትናና በታላቅ ተጋድሎ የኖሩት የቅዱስ አባ ኪሮስ ወርሃዊ መታሰቢያ።',
+    fullStory: 'በትሕትናና በታላቅ ተጋድሎ የኖሩት የቅዱስ አባ ኪሮስ ወርሃዊ መታሰቢያ።',
+  ),
+  '1-9': SynaxariumEntry(
+    snippet: 'በኒቅያ ጉባኤ ተገኝተው አርዮስን ያወገዙት 318ቱ ኦርቶዶክሳውያን ሊቃውንት።',
+    fullStory: 'በኒቅያ ጉባኤ ተገኝተው አርዮስን ያወገዙት 318ቱ ኦርቶዶክሳውያን ሊቃውንት።',
+  ),
+  '1-10': SynaxariumEntry(
+    snippet: 'የጌታችን የኢየሱስ ክርስቶስ ክቡርና ሕያው መስቀል የሚታሰብበት ወርሃዊ ዕለት።',
+    fullStory: 'የጌታችን የኢየሱስ ክርስቶስ ክቡርና ሕያው መስቀል የሚታሰብበት ወርሃዊ ዕለት።',
+  ),
+  '1-11': SynaxariumEntry(
+    snippet: 'የእመቤታችን የቅድስት ድንግል ማርያም ደጋግ ወላጆች የሚታሰቡበት ዕለት።',
+    fullStory: 'የእመቤታችን የቅድስት ድንግል ማርያም ደጋግ ወላጆች የሚታሰቡበት ዕለት።',
+  ),
+  '1-12': SynaxariumEntry(
+    snippet: 'የመላእክት አለቃ የቅዱስ ሚካኤል ጥበቃና ለሰዎች የሚያቀርበው የምሕረት ልመና።',
+    fullStory: 'የመላእክት አለቃ የቅዱስ ሚካኤል ጥበቃና ለሰዎች የሚያቀርበው የምሕረት ልመና።',
+  ),
+  '1-13': SynaxariumEntry(
+    snippet: 'ለልዑል እግዚአብሔር አብ የሚቀርብ ልዩ የወርሃዊ አምልኮና የምስጋና ዕለት።',
+    fullStory: 'ለልዑል እግዚአብሔር አብ የሚቀርብ ልዩ የወርሃዊ አምልኮና የምስጋና ዕለት።',
+  ),
+  '1-14': SynaxariumEntry(
+    snippet: 'ከዘጠኙ ቅዱሳን አንዱ የሆኑት የታላቁ አባታችን የአቡነ አረጋዊ ገድልና ክብር።',
+    fullStory: 'ከዘጠኙ ቅዱሳን አንዱ የሆኑት የታላቁ አባታችን የአቡነ አረጋዊ ገድልና ክብር።',
+  ),
+  '1-15': SynaxariumEntry(
+    snippet: 'ሕፃኑ ቅዱስ ቂርቆስና እናቱ ኢየሉጣ በእሳት ውስጥ የጸኑበት የሰማዕትነት ታሪክ።',
+    fullStory: 'ሕፃኑ ቅዱስ ቂርቆስና እናቱ ኢየሉጣ በእሳት ውስጥ የጸኑበት የሰማዕትነት ታሪክ።',
+  ),
+  '1-16': SynaxariumEntry(
+    snippet: 'እግዚአብሔር ለእመቤታችን የዓለምን ምሕረት የሰጠበት ታላቅ የቃልኪዳን ዕለት።',
+    fullStory: 'እግዚአብሔር ለእመቤታችን የዓለምን ምሕረት የሰጠበት ታላቅ የቃልኪዳን ዕለት።',
   ),
   '1-17': SynaxariumEntry(
-    snippet: 'መስቀል የጌታችን መስቀል በቅድስት ዕሌኒ ንግሥት የተገኘበት ቀን ሆኖ በደመራ በዓል ይከበራል።',
-    fullStory: 'ይህ በዓል የጌታችን የኢየሱስ ክርስቶስ መስቀል በ4ኛው መቶ ክፍለ ዘመን በቅድስት ዕሌኒ ንግሥት እንደ ተገኘ የሚያስታውስ ነው። ንግሥት ዕሌኒ ቅዱሱን መስቀል ለማግኘት ብዙ ጥረት ካደረገች በኋላ፣ የተቃጠለ ዕጣን ጢስ ወደ ላይ ወጥቶ የመስቀሉን ቦታ አሳያት። ይህንን መታሰቢያ በማድረግ ኢትዮጵያውያን ምዕመናን ደመራ በማቃጠል፣ እሳቱ ወደ ምን አቅጣጫ እንደሚዘንብል በመመልክት የመጭውን ዓመት ምልክት እንደ ያደርጉታል። ይህ ከእምነት ጋር የተያያዘ ጥንታዊ ትውፊት ነው።',
+    snippet: 'ንግሥት ዕሌኒ የጌታን መስቀል በእጣን ጢስ ምልክትነት ያገኘችበት ታላቅ ዓመታዊ በዓል።',
+    fullStory: 'ንግሥት ዕሌኒ የጌታን መስቀል በእጣን ጢስ ምልክትነት ያገኘችበት ታላቅ ዓመታዊ በዓል።',
+  ),
+  '1-18': SynaxariumEntry(
+    snippet: 'ስለ ሰንበት ቅድስናና ስለ ኦርቶዶክስ ሥርዓት የተጋደሉት ጻድቅ አባት መታሰቢያ።',
+    fullStory: 'ስለ ሰንበት ቅድስናና ስለ ኦርቶዶክስ ሥርዓት የተጋደሉት ጻድቅ አባት መታሰቢያ።',
+  ),
+  '1-19': SynaxariumEntry(
+    snippet: 'የምሥራች አብሳሪውና ቅዱሳንን ከሚነድ እሳት የሚያድነው መልአክ ወርሃዊ በዓል።',
+    fullStory: 'የምሥራች አብሳሪውና ቅዱሳንን ከሚነድ እሳት የሚያድነው መልአክ ወርሃዊ በዓል።',
+  ),
+  '1-20': SynaxariumEntry(
+    snippet: 'በሰማይና በምድር ያሉ ቅዱሳንና ጻድቃን ሁሉ በአንድነት የሚታሰቡበት ዕለት።',
+    fullStory: 'በሰማይና በምድር ያሉ ቅዱሳንና ጻድቃን ሁሉ በአንድነት የሚታሰቡበት ዕለት።',
+  ),
+  '1-21': SynaxariumEntry(
+    snippet: 'የጌታችን ግማደ መስቀል በግሸን ደብረ ከርቤ ተራራ በክብር የተቀመጠበት ታላቅ ዓመታዊ በዓል።',
+    fullStory: 'የጌታችን ግማደ መስቀል በግሸን ደብረ ከርቤ ተራራ በክብር የተቀመጠበት ታላቅ ዓመታዊ በዓል።',
+  ),
+  '1-22': SynaxariumEntry(
+    snippet: 'ለእመቤታችን ምስጋና በመጻፉ ምክንያት ከእሷ የብርሃን ልብስ የተቀበለ አባት።',
+    fullStory: 'ለእመቤታችን ምስጋና በመጻፉ ምክንያት ከእሷ የብርሃን ልብስ የተቀበለ አባት።',
   ),
   '1-23': SynaxariumEntry(
-    snippet: 'ቅዱስ ጊዮርጊስ ለክርስቶስ እምነት ብዙ መከራ ቢደርስበትም ጸንቶ የቆመ ታላቅ ሰማዕት ነው።',
-    fullStory: 'ቅዱስ ጊዮርጊስ በሮም ግዛት ዘመነ ድዮቅልጥያኖስ ንግሥት የነበረ ወታደር ነበር። ክርስቲያን በመሆኑ ምክንያት እምነቱን ለመካድ ብዙ ግፍና መከራ ቢደርስበትም፣ በጽናት ጸንቶ ቆመ። ለክርስቶስ ያለውን ፍቅር ላለመተው ብዙ ስቃይን ታገሰ፣ በመጨረሻም በሰማዕትነት አለፈ። ቅዱስ ጊዮርጊስ የጽናት፣ የእምነት እና የጀግንነት ምሳሌ ተደርጎ ይታያል፤ ስለዚህም በኢትዮጵያ ኦርቶዶክስ ተዋሕዶ ቤተ ክርስቲያን እጅግ የተወደደ ቅዱስ ነው።',
+    snippet: 'የሰማዕታት አለቃ የልዳው ኮከብ ቅዱስ ጊዮርጊስ ተጋድሎና ድል ወርሃዊ መታሰቢያ።',
+    fullStory: 'የሰማዕታት አለቃ የልዳው ኮከብ ቅዱስ ጊዮርጊስ ተጋድሎና ድል ወርሃዊ መታሰቢያ።',
   ),
   '1-24': SynaxariumEntry(
-    snippet: 'አቡነ ተክለ ሃይማኖት የኢትዮጵያ ታላቅ መነኩሴና የደብረ ሊባኖስ ገዳም መሥራች ናቸው።',
-    fullStory: 'አቡነ ተክለ ሃይማኖት በ13ኛው መቶ ክፍለ ዘመን ተወልደው፣ ሕይወታቸውን ሙሉ ለጸሎት እና ለትምህርት ሰጥተዋል። ስድስት ክንፍ እንደ መልአክ እንዲኖራቸው እስኪደረግ ድረስ በብዙ ጾምና ጸሎት እግዚአብሔርን አገለገሉ። ደብረ ሊባኖስን መሥርተው ብዙ ደቀ መዛሙርትን አስተምረዋል። ህይወታቸው የጽናት፣ የትህትና እና ላልተወሰነ ፍቅር ለእግዚአብሔር ምሳሌ ነው።',
+    snippet: 'ታላቁ የሀገራችን ብርሃንና ሐዋርያዊ አባት አቡነ ተክለሃይማኖት የሚታሰቡበት።',
+    fullStory: 'ታላቁ የሀገራችን ብርሃንና ሐዋርያዊ አባት አቡነ ተክለሃይማኖት የሚታሰቡበት።',
+  ),
+  '1-25': SynaxariumEntry(
+    snippet: 'በመልአክ ሰይፍ ጠላትን ድል ያደረገው ባለ ሁለት ሰይፉ ሰማዕት ወርሃዊ በዓል።',
+    fullStory: 'በመልአክ ሰይፍ ጠላትን ድል ያደረገው ባለ ሁለት ሰይፉ ሰማዕት ወርሃዊ በዓል።',
+  ),
+  '1-26': SynaxariumEntry(
+    snippet: 'የማኅበረ ቅዱሳንና የምዕመናን የእመቤታችንን ስደት የሚያስቡበት የ45 ቀናት ጾም መግቢያ።',
+    fullStory: 'የማኅበረ ቅዱሳንና የምዕመናን የእመቤታችንን ስደት የሚያስቡበት የ45 ቀናት ጾም መግቢያ።',
+  ),
+  '1-27': SynaxariumEntry(
+    snippet: 'ጌታችን ዓለምን ለማዳን በጎልጎታ የከፈለውን ታላቅ መሥዋዕትነት ማሰብ።',
+    fullStory: 'ጌታችን ዓለምን ለማዳን በጎልጎታ የከፈለውን ታላቅ መሥዋዕትነት ማሰብ።',
+  ),
+  '1-28': SynaxariumEntry(
+    snippet: 'እግዚአብሔር ከእኛ ጋር መሆኑንና ምስጢረ ሥጋዌ የሚወደስበት ወርሃዊ ዕለት።',
+    fullStory: 'እግዚአብሔር ከእኛ ጋር መሆኑንና ምስጢረ ሥጋዌ የሚወደስበት ወርሃዊ ዕለት።',
+  ),
+  '1-29': SynaxariumEntry(
+    snippet: 'ስለ ንጽሕናዋና ስለ ክርስቶስ ፍቅር ድርጣድስን ያሸነፈችበት ታላቅ ዓመታዊ በዓል።',
+    fullStory: 'ስለ ንጽሕናዋና ስለ ክርስቶስ ፍቅር ድርጣድስን ያሸነፈችበት ታላቅ ዓመታዊ በዓል።',
+  ),
+  '1-30': SynaxariumEntry(
+    snippet: 'የእስክንድርያ መንበር መሥራችና የመጀመሪያው ወንጌል ጸሐፊ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የእስክንድርያ መንበር መሥራችና የመጀመሪያው ወንጌል ጸሐፊ ወርሃዊ መታሰቢያ።',
+  ),
+  '2-1': SynaxariumEntry(
+    snippet: 'የእመቤታችን ልደትና ነቢዩ ኤልያስ በብርሃን ሰረገላ ወደ ሰማይ ያረገበት ታላቅ በዓል።',
+    fullStory: 'የእመቤታችን ልደትና ነቢዩ ኤልያስ በብርሃን ሰረገላ ወደ ሰማይ ያረገበት ታላቅ በዓል።',
+  ),
+  '2-2': SynaxariumEntry(
+    snippet: 'የቅዱስ ታዴዎስ ሐዋርያዊ አገልግሎት፣ ተጋድሎና ሰማዕትነት መታሰቢያ።',
+    fullStory: 'የቅዱስ ታዴዎስ ሐዋርያዊ አገልግሎት፣ ተጋድሎና ሰማዕትነት መታሰቢያ።',
+  ),
+  '2-3': SynaxariumEntry(
+    snippet: 'እመቤታችን ወደ ቤተ መቅደስ የገባችበት ወርሃዊ መታሰቢያ።',
+    fullStory: 'እመቤታችን ወደ ቤተ መቅደስ የገባችበት ወርሃዊ መታሰቢያ።',
+  ),
+  '2-4': SynaxariumEntry(
+    snippet: 'የቅዱስ ዮሐንስ ወንጌላዊ የፍቅርና ረቂቅ መለኮት ትምህርት ምስጋና።',
+    fullStory: 'የቅዱስ ዮሐንስ ወንጌላዊ የፍቅርና ረቂቅ መለኮት ትምህርት ምስጋና።',
+  ),
+  '2-5': SynaxariumEntry(
+    snippet: 'ጻድቁ አባታችን በዝቋላ የጸለዩት ታላቅ ጸሎትና ገድል መታሰቢያ።',
+    fullStory: 'ጻድቁ አባታችን በዝቋላ የጸለዩት ታላቅ ጸሎትና ገድል መታሰቢያ።',
+  ),
+  '2-6': SynaxariumEntry(
+    snippet: 'የቅድስት ቤተሰብ በስደት ወቅት ያሳለፉት መከራና በረከት መታሰቢያ።',
+    fullStory: 'የቅድስት ቤተሰብ በስደት ወቅት ያሳለፉት መከራና በረከት መታሰቢያ።',
+  ),
+  '2-7': SynaxariumEntry(
+    snippet: 'የቅድስት ሥላሴ መለኮታዊ ክብርና ቸርነት የሚወደስበት ዕለት።',
+    fullStory: 'የቅድስት ሥላሴ መለኮታዊ ክብርና ቸርነት የሚወደስበት ዕለት።',
+  ),
+  '2-8': SynaxariumEntry(
+    snippet: 'የቅዱስ አባ ኪሮስ ገዳማዊ ሕይወትና የጽናት ተጋድሎ ማሰብ።',
+    fullStory: 'የቅዱስ አባ ኪሮስ ገዳማዊ ሕይወትና የጽናት ተጋድሎ ማሰብ።',
+  ),
+  '2-9': SynaxariumEntry(
+    snippet: 'የሃይማኖትን ቀና ሥርዓት የደነገጉት 318ቱ ሊቃውንት መታሰቢያ።',
+    fullStory: 'የሃይማኖትን ቀና ሥርዓት የደነገጉት 318ቱ ሊቃውንት መታሰቢያ።',
+  ),
+  '2-10': SynaxariumEntry(
+    snippet: 'የጌታችን የኢየሱስ ክርስቶስ የማዳን መሣሪያ የሆነው መስቀል ምስጋና።',
+    fullStory: 'የጌታችን የኢየሱስ ክርስቶስ የማዳን መሣሪያ የሆነው መስቀል ምስጋና።',
+  ),
+  '2-11': SynaxariumEntry(
+    snippet: 'የእመቤታችን ድንግል ማርያም ወላጆች ቅድስና የሚታሰብበት ዕለት።',
+    fullStory: 'የእመቤታችን ድንግል ማርያም ወላጆች ቅድስና የሚታሰብበት ዕለት።',
+  ),
+  '2-12': SynaxariumEntry(
+    snippet: 'ቅዱስ ሚካኤል ሕዝበ ክርስቲያንን ከጠላት ውግያ የሚጠብቅበት ወርሃዊ በዓል።',
+    fullStory: 'ቅዱስ ሚካኤል ሕዝበ ክርስቲያንን ከጠላት ውግያ የሚጠብቅበት ወርሃዊ በዓል።',
+  ),
+  '2-13': SynaxariumEntry(
+    snippet: 'ለእግዚአብሔር አብ የሚቀርብ የፍጥረት ሁሉ ፈጣሪነቱ ምስጋና።',
+    fullStory: 'ለእግዚአብሔር አብ የሚቀርብ የፍጥረት ሁሉ ፈጣሪነቱ ምስጋና።',
+  ),
+  '2-14': SynaxariumEntry(
+    snippet: 'የአቡነ አረጋዊ ገድልና የንጉሥ ልጅ ሆኖ ሳለ ሰርጉን ትቶ በሰው ደጅ የለመነው የቅዱስ ገብረ ክርስቶስ ታላቅ ዕረፍት።',
+    fullStory: 'የአቡነ አረጋዊ ገድልና የንጉሥ ልጅ ሆኖ ሳለ ሰርጉን ትቶ በሰው ደጅ የለመነው የቅዱስ ገብረ ክርስቶስ ታላቅ ዕረፍት።',
+  ),
+  '2-15': SynaxariumEntry(
+    snippet: 'የሕፃኑ ቅዱስ ቂርቆስና የኢየሉጣ የጽናትና የሰማዕትነት ክብር።',
+    fullStory: 'የሕፃኑ ቅዱስ ቂርቆስና የኢየሉጣ የጽናትና የሰማዕትነት ክብር።',
+  ),
+  '2-16': SynaxariumEntry(
+    snippet: 'እመቤታችን ለምልመናን የምታቀርበው አማላጅነትና ቃልኪዳን።',
+    fullStory: 'እመቤታችን ለምልመናን የምታቀርበው አማላጅነትና ቃልኪዳን።',
+  ),
+  '2-17': SynaxariumEntry(
+    snippet: 'የመጀመሪያው ሰማዕትና የዲያቆናት አለቃ የቅዱስ እስጢፋኖስ ክብር።',
+    fullStory: 'የመጀመሪያው ሰማዕትና የዲያቆናት አለቃ የቅዱስ እስጢፋኖስ ክብር።',
+  ),
+  '2-18': SynaxariumEntry(
+    snippet: 'የጻድቁ አባታችን የአቡነ ኤዎስጣቴዎስን ወርሃዊ ገድል ማሰብ።',
+    fullStory: 'የጻድቁ አባታችን የአቡነ ኤዎስጣቴዎስን ወርሃዊ ገድል ማሰብ።',
+  ),
+  '2-19': SynaxariumEntry(
+    snippet: 'ቅዱስ ገብርኤል ሰዎችን ከጭንቅና ከመከራ የሚያድንበት ወርሃዊ ዕለት።',
+    fullStory: 'ቅዱስ ገብርኤል ሰዎችን ከጭንቅና ከመከራ የሚያድንበት ወርሃዊ ዕለት።',
+  ),
+  '2-20': SynaxariumEntry(
+    snippet: 'የቅዱሳን ሁሉ ማኅበርና የሰማይ በረከታቸው የሚታሰብበት።',
+    fullStory: 'የቅዱሳን ሁሉ ማኅበርና የሰማይ በረከታቸው የሚታሰብበት።',
+  ),
+  '2-21': SynaxariumEntry(
+    snippet: 'የእመቤታችን የቅድስት ድንግል ማርያም ታላቅ ወርሃዊ የምስጋና በዓል።',
+    fullStory: 'የእመቤታችን የቅድስት ድንግል ማርያም ታላቅ ወርሃዊ የምስጋና በዓል።',
   ),
   '2-22': SynaxariumEntry(
-    snippet: 'ቅዱስ ሉቃስ ወንጌላዊ ከአራቱ ወንጌላውያን አንዱ ሲሆን፣ ሐኪምና ሰዓሊ ጭምር ነበር።',
-    fullStory: 'ቅዱስ ሉቃስ ከጥንት ግሪክ ምሁራን አንዱ ሆኖ፣ ቅዱስ ወንጌልን እና የሐዋርያት ሥራን የጻፈ ነው። እርሱ ራሱ ከአህዛብ የተወለደ ሲሆን፣ በሙያው ሐኪም ነበር። ከቅዱስ ጳውሎስ ሐዋርያ ጋር ብዙ ቦታዎችን ተጓዘ፣ የጌታችንን ወንጌል ለማስፋት ትልቅ አስተዋጽኦ አበረከተ። እንደ ትውፊት የእመቤታችን ቅድስት ድንግል ማርያምን ምስል ለመጀመሪያ ጊዜ የሳለ ሰዓሊ ተብሎ ይታመናል።',
+    snippet: 'ሐኪምና ሰዓሊ የነበረው፣ የእመቤታችንን ሥዕል መጀመሪያ የሳለው ሐዋርያ ዓመታዊ ዕረፍት።',
+    fullStory: 'ሐኪምና ሰዓሊ የነበረው፣ የእመቤታችንን ሥዕል መጀመሪያ የሳለው ሐዋርያ ዓመታዊ ዕረፍት።',
+  ),
+  '2-23': SynaxariumEntry(
+    snippet: 'የኮከበ ልዳው የቅዱስ ጊዮርጊስ ወርሃዊ የድል መታሰቢያ።',
+    fullStory: 'የኮከበ ልዳው የቅዱስ ጊዮርጊስ ወርሃዊ የድል መታሰቢያ።',
+  ),
+  '2-24': SynaxariumEntry(
+    snippet: 'የአባታችን የአቡነ ተክለ ሃይማኖት ሐዋርያዊ አገልግሎት ምስጋና።',
+    fullStory: 'የአባታችን የአቡነ ተክለ ሃይማኖት ሐዋርያዊ አገልግሎት ምስጋና።',
+  ),
+  '2-25': SynaxariumEntry(
+    snippet: 'የሰማዕቱ የቅዱስ መርቆሬዎስ ወርሃዊ የጋሻና የሰይፍ ረድኤት።',
+    fullStory: 'የሰማዕቱ የቅዱስ መርቆሬዎስ ወርሃዊ የጋሻና የሰይፍ ረድኤት።',
+  ),
+  '2-26': SynaxariumEntry(
+    snippet: 'የቅዱስ ቶማስ ሐዋርያ ወርሃዊ መታሰቢያና የህንድ ስብከቱ።',
+    fullStory: 'የቅዱስ ቶማስ ሐዋርያ ወርሃዊ መታሰቢያና የህንድ ስብከቱ።',
+  ),
+  '2-27': SynaxariumEntry(
+    snippet: 'የመድኃኔዓለም (የዓለም መድኃኒት) ታላቁ ዓመታዊ የቅዳሴና የምስጋና በዓል።',
+    fullStory: 'የመድኃኔዓለም (የዓለም መድኃኒት) ታላቁ ዓመታዊ የቅዳሴና የምስጋና በዓል።',
+  ),
+  '2-28': SynaxariumEntry(
+    snippet: 'የጌታችን የአማኑኤል ወርሃዊ ጥበቃና መለኮታዊ ፍቅር።',
+    fullStory: 'የጌታችን የአማኑኤል ወርሃዊ ጥበቃና መለኮታዊ ፍቅር።',
+  ),
+  '2-29': SynaxariumEntry(
+    snippet: 'የእግዚአብሔር ወልድ መለኮታዊ ሥራዎችና ስብከቱ የሚታሰብበት።',
+    fullStory: 'የእግዚአብሔር ወልድ መለኮታዊ ሥራዎችና ስብከቱ የሚታሰብበት።',
+  ),
+  '2-30': SynaxariumEntry(
+    snippet: 'የወንጌላዊው ማርቆስ ወርሃዊ የቅድስናና የስብከት ታሪክ።',
+    fullStory: 'የወንጌላዊው ማርቆስ ወርሃዊ የቅድስናና የስብከት ታሪክ።',
+  ),
+  '3-1': SynaxariumEntry(
+    snippet: 'የእመቤታችን የልደት በዓል ወርሃዊ የምስጋና ቅዳሴ።',
+    fullStory: 'የእመቤታችን የልደት በዓል ወርሃዊ የምስጋና ቅዳሴ።',
+  ),
+  '3-2': SynaxariumEntry(
+    snippet: 'የሐዋርያው የቅዱስ ታዴዎስ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የሐዋርያው የቅዱስ ታዴዎስ ወርሃዊ መታሰቢያ።',
+  ),
+  '3-3': SynaxariumEntry(
+    snippet: 'የእመቤታችን ወደ መቅደስ መግባት ወርሃዊ በዓል።',
+    fullStory: 'የእመቤታችን ወደ መቅደስ መግባት ወርሃዊ በዓል።',
+  ),
+  '3-4': SynaxariumEntry(
+    snippet: 'የቅዱስ ዮሐንስ ወንጌላዊ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱስ ዮሐንስ ወንጌላዊ ወርሃዊ መታሰቢያ።',
+  ),
+  '3-5': SynaxariumEntry(
+    snippet: 'የጻድቁ አባታችን የአቡነ ገብረ መንፈስ ቅዱስ ወርሃዊ በረከት።',
+    fullStory: 'የጻድቁ አባታችን የአቡነ ገብረ መንፈስ ቅዱስ ወርሃዊ በረከት።',
+  ),
+  '3-6': SynaxariumEntry(
+    snippet: 'የቅድስት ቤተሰብ ስደት ማብቂያና የ45 ቀናት የጽጌ ጾም ፍጻሜ ዓመታዊ በዓል።',
+    fullStory: 'የቅድስት ቤተሰብ ስደት ማብቂያና የ45 ቀናት የጽጌ ጾም ፍጻሜ ዓመታዊ በዓል።',
+  ),
+  '3-7': SynaxariumEntry(
+    snippet: 'የቅድስት ሥላሴ ወርሃዊ የምስጋናና የውዳሴ ጸሎት።',
+    fullStory: 'የቅድስት ሥላሴ ወርሃዊ የምስጋናና የውዳሴ ጸሎት።',
+  ),
+  '3-8': SynaxariumEntry(
+    snippet: 'የእግዚአብሔርን መንበር የሚሸከሙት አራቱ ኪሩቤል ታላቅ ዓመታዊ በዓል።',
+    fullStory: 'የእግዚአብሔርን መንበር የሚሸከሙት አራቱ ኪሩቤል ታላቅ ዓመታዊ በዓል።',
+  ),
+  '3-9': SynaxariumEntry(
+    snippet: 'የ318ቱ የኒቅያ አባቶች ወርሃዊ መታሰቢያ።',
+    fullStory: 'የ318ቱ የኒቅያ አባቶች ወርሃዊ መታሰቢያ።',
+  ),
+  '3-10': SynaxariumEntry(
+    snippet: 'የክርስቶስ መስቀል ወርሃዊ የድል አክሊል ማሰብ።',
+    fullStory: 'የክርስቶስ መስቀል ወርሃዊ የድል አክሊል ማሰብ።',
+  ),
+  '3-11': SynaxariumEntry(
+    snippet: 'የእመቤታችን እናት የቅድስት ሐና ወርሃዊ መታሰቢያ።',
+    fullStory: 'የእመቤታችን እናት የቅድስት ሐና ወርሃዊ መታሰቢያ።',
+  ),
+  '3-12': SynaxariumEntry(
+    snippet: 'ቅዱስ ሚካኤል ሳጥናኤልን ድል አድርጎ ከሰማይ የጣለበት ታላቅ ዓመታዊ በዓል።',
+    fullStory: 'ቅዱስ ሚካኤል ሳጥናኤልን ድል አድርጎ ከሰማይ የጣለበት ታላቅ ዓመታዊ በዓል።',
+  ),
+  '3-13': SynaxariumEntry(
+    snippet: 'ለእግዚአብሔር አብ የሚቀርብ የወርሃዊ ስግደትና ምስጋና።',
+    fullStory: 'ለእግዚአብሔር አብ የሚቀርብ የወርሃዊ ስግደትና ምስጋና።',
+  ),
+  '3-14': SynaxariumEntry(
+    snippet: 'የጻድቁ የአቡነ አረጋዊ ወርሃዊ የረድኤት በዓል።',
+    fullStory: 'የጻድቁ የአቡነ አረጋዊ ወርሃዊ የረድኤት በዓል።',
+  ),
+  '3-15': SynaxariumEntry(
+    snippet: 'የቅዱስ ቂርቆስና የኢየሉጣ ወርሃዊ ተራዳኢነት።',
+    fullStory: 'የቅዱስ ቂርቆስና የኢየሉጣ ወርሃዊ ተራዳኢነት።',
+  ),
+  '3-16': SynaxariumEntry(
+    snippet: 'የእመቤታችን የቃልኪዳን ወርሃዊ የምሕረት በዓል።',
+    fullStory: 'የእመቤታችን የቃልኪዳን ወርሃዊ የምሕረት በዓል።',
+  ),
+  '3-17': SynaxariumEntry(
+    snippet: 'የሊቀ ዲያቆናት የቅዱስ እስጢፋኖስ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የሊቀ ዲያቆናት የቅዱስ እስጢፋኖስ ወርሃዊ መታሰቢያ።',
+  ),
+  '3-18': SynaxariumEntry(
+    snippet: 'የአባታችን የአቡነ ኤዎስጣቴዎስ ወርሃዊ በረከት።',
+    fullStory: 'የአባታችን የአቡነ ኤዎስጣቴዎስ ወርሃዊ በረከት።',
+  ),
+  '3-19': SynaxariumEntry(
+    snippet: 'የቅዱስ ገብርኤል ወርሃዊ የጥበቃና የብስራት በዓል።',
+    fullStory: 'የቅዱስ ገብርኤል ወርሃዊ የጥበቃና የብስራት በዓል።',
+  ),
+  '3-20': SynaxariumEntry(
+    snippet: 'የቅዱሳን ሁሉ ማኅበርና ጸሎት ማሰብ።',
+    fullStory: 'የቅዱሳን ሁሉ ማኅበርና ጸሎት ማሰብ።',
+  ),
+  '3-21': SynaxariumEntry(
+    snippet: 'ታቦተ ጽዮን ወደ አክሱም የገባችበትና እመቤታችን የሕያው ቃል ኪዳን ታቦት መሆኗ ታላቅ ዓመታዊ በዓል።',
+    fullStory: 'ታቦተ ጽዮን ወደ አክሱም የገባችበትና እመቤታችን የሕያው ቃል ኪዳን ታቦት መሆኗ ታላቅ ዓመታዊ በዓል።',
+  ),
+  '3-22': SynaxariumEntry(
+    snippet: 'የቅዱስ ደቅስዮስ ወርሃዊ መታሰቢያና ክብር።',
+    fullStory: 'የቅዱስ ደቅስዮስ ወርሃዊ መታሰቢያና ክብር።',
+  ),
+  '3-23': SynaxariumEntry(
+    snippet: 'የሰማዕቱ የቅዱስ ጊዮርጊስ ወርሃዊ የቃልኪዳን በዓል።',
+    fullStory: 'የሰማዕቱ የቅዱስ ጊዮርጊስ ወርሃዊ የቃልኪዳን በዓል።',
+  ),
+  '3-24': SynaxariumEntry(
+    snippet: 'በሰማይ ዙፋን ዙሪያ የወርቅ ማዕጠንት ይዘው የሚቆሙ 24ቱ ካህናተ ሰማይ ዓመታዊ በዓል።',
+    fullStory: 'በሰማይ ዙፋን ዙሪያ የወርቅ ማዕጠንት ይዘው የሚቆሙ 24ቱ ካህናተ ሰማይ ዓመታዊ በዓል።',
+  ),
+  '3-25': SynaxariumEntry(
+    snippet: 'የሰማዕቱ የቅዱስ መርቆሬዎስ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የሰማዕቱ የቅዱስ መርቆሬዎስ ወርሃዊ መታሰቢያ።',
+  ),
+  '3-26': SynaxariumEntry(
+    snippet: 'የሐዋርያው የቅዱስ ቶማስ ወርሃዊ ተጋድሎ ማሰብ።',
+    fullStory: 'የሐዋርያው የቅዱስ ቶማስ ወርሃዊ ተጋድሎ ማሰብ።',
+  ),
+  '3-27': SynaxariumEntry(
+    snippet: 'የመድኃኔዓለም ወርሃዊ የይቅርታና የምሕረት በዓል።',
+    fullStory: 'የመድኃኔዓለም ወርሃዊ የይቅርታና የምሕረት በዓል።',
+  ),
+  '3-28': SynaxariumEntry(
+    snippet: 'የጌታችን የአማኑኤል ወርሃዊ ውዳሴ።',
+    fullStory: 'የጌታችን የአማኑኤል ወርሃዊ ውዳሴ።',
+  ),
+  '3-29': SynaxariumEntry(
+    snippet: 'የታላቁ ሰማዕት የቅዱስ መርቆሬዎስ ዓመታዊ የዕረፍትና የሰማዕትነት በዓል።',
+    fullStory: 'የታላቁ ሰማዕት የቅዱስ መርቆሬዎስ ዓመታዊ የዕረፍትና የሰማዕትነት በዓል።',
+  ),
+  '3-30': SynaxariumEntry(
+    snippet: 'የወንጌላዊው የቅዱስ ማርቆስ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የወንጌላዊው የቅዱስ ማርቆስ ወርሃዊ መታሰቢያ።',
+  ),
+  '4-1': SynaxariumEntry(
+    snippet: 'የእመቤታችን የልደት ወርሃዊ ምስጋና።',
+    fullStory: 'የእመቤታችን የልደት ወርሃዊ ምስጋና።',
+  ),
+  '4-2': SynaxariumEntry(
+    snippet: 'የቅዱስ ታዴዎስ ወርሃዊ የሐዋርያነት ክብር።',
+    fullStory: 'የቅዱስ ታዴዎስ ወርሃዊ የሐዋርያነት ክብር።',
+  ),
+  '4-3': SynaxariumEntry(
+    snippet: 'እመቤታችን በሦስት ዓመቷ ወደ ቤተ መቅደስ የገባችበት ታላቅ ዓመታዊ በዓል።',
+    fullStory: 'እመቤታችን በሦስት ዓመቷ ወደ ቤተ መቅደስ የገባችበት ታላቅ ዓመታዊ በዓል።',
+  ),
+  '4-4': SynaxariumEntry(
+    snippet: 'የቅዱስ ዮሐንስ ወንጌላዊ ወርሃዊ ክብር።',
+    fullStory: 'የቅዱስ ዮሐንስ ወንጌላዊ ወርሃዊ ክብር።',
+  ),
+  '4-5': SynaxariumEntry(
+    snippet: 'የአቡነ ገብረ መንፈስ ቅዱስ ወርሃዊ ጸሎት ማሰብ።',
+    fullStory: 'የአቡነ ገብረ መንፈስ ቅዱስ ወርሃዊ ጸሎት ማሰብ።',
+  ),
+  '4-6': SynaxariumEntry(
+    snippet: 'የእመቤታችንና የልጇ የቁስቋም ወርሃዊ በዓል።',
+    fullStory: 'የእመቤታችንና የልጇ የቁስቋም ወርሃዊ በዓል።',
+  ),
+  '4-7': SynaxariumEntry(
+    snippet: 'የቅድስት ሥላሴ መለኮታዊ ክብር ምስጋና።',
+    fullStory: 'የቅድስት ሥላሴ መለኮታዊ ክብር ምስጋና።',
+  ),
+  '4-8': SynaxariumEntry(
+    snippet: 'የጻድቁ የአባ ኪሮስ ወርሃዊ የዕረፍት መታሰቢያ።',
+    fullStory: 'የጻድቁ የአባ ኪሮስ ወርሃዊ የዕረፍት መታሰቢያ።',
+  ),
+  '4-9': SynaxariumEntry(
+    snippet: 'የኒቅያ አባቶች የሃይማኖት ውሳኔ ማሰብ።',
+    fullStory: 'የኒቅያ አባቶች የሃይማኖት ውሳኔ ማሰብ።',
+  ),
+  '4-10': SynaxariumEntry(
+    snippet: 'የክርስቶስ ክቡር መስቀል ወርሃዊ በዓል።',
+    fullStory: 'የክርስቶስ ክቡር መስቀል ወርሃዊ በዓል።',
+  ),
+  '4-11': SynaxariumEntry(
+    snippet: 'የእመቤታችን ወላጆች ወርሃዊ መታሰቢያ።',
+    fullStory: 'የእመቤታችን ወላጆች ወርሃዊ መታሰቢያ።',
+  ),
+  '4-12': SynaxariumEntry(
+    snippet: 'የቅዱስ ሚካኤል ወርሃዊ የረዳትነት በዓል።',
+    fullStory: 'የቅዱስ ሚካኤል ወርሃዊ የረዳትነት በዓል።',
+  ),
+  '4-13': SynaxariumEntry(
+    snippet: 'ለእግዚአብሔር አብ የሚቀርብ የቅዳሴ ምስጋና።',
+    fullStory: 'ለእግዚአብሔር አብ የሚቀርብ የቅዳሴ ምስጋና።',
+  ),
+  '4-14': SynaxariumEntry(
+    snippet: 'የአባታችን የአቡነ አረጋዊ ወርሃዊ በረከት።',
+    fullStory: 'የአባታችን የአቡነ አረጋዊ ወርሃዊ በረከት።',
+  ),
+  '4-15': SynaxariumEntry(
+    snippet: 'የቅዱስ ቂርቆስ ወርሃዊ የሕፃናት ጠባቂነት።',
+    fullStory: 'የቅዱስ ቂርቆስ ወርሃዊ የሕፃናት ጠባቂነት።',
+  ),
+  '4-16': SynaxariumEntry(
+    snippet: 'የእመቤታችን የቃልኪዳን ወርሃዊ ምስጋና።',
+    fullStory: 'የእመቤታችን የቃልኪዳን ወርሃዊ ምስጋና።',
+  ),
+  '4-17': SynaxariumEntry(
+    snippet: 'የቅዱስ እስጢፋኖስ ወርሃዊ የዲያቆናት በዓል።',
+    fullStory: 'የቅዱስ እስጢፋኖስ ወርሃዊ የዲያቆናት በዓል።',
+  ),
+  '4-18': SynaxariumEntry(
+    snippet: 'የአቡነ ኤዎስጣቴዎስ ወርሃዊ የገድል ታሪክ።',
+    fullStory: 'የአቡነ ኤዎስጣቴዎስ ወርሃዊ የገድል ታሪክ።',
+  ),
+  '4-19': SynaxariumEntry(
+    snippet: 'የቁልቢው ቅዱስ ገብርኤል ታላቅና ታሪካዊ ዓመታዊ የቃልኪዳን በዓል።',
+    fullStory: 'የቁልቢው ቅዱስ ገብርኤል ታላቅና ታሪካዊ ዓመታዊ የቃልኪዳን በዓል።',
+  ),
+  '4-20': SynaxariumEntry(
+    snippet: 'የቅዱሳን ሁሉ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱሳን ሁሉ ወርሃዊ መታሰቢያ።',
+  ),
+  '4-21': SynaxariumEntry(
+    snippet: 'የእመቤታችን የቅድስት ድንግል ማርያም ወርሃዊ ውዳሴ።',
+    fullStory: 'የእመቤታችን የቅድስት ድንግል ማርያም ወርሃዊ ውዳሴ።',
+  ),
+  '4-22': SynaxariumEntry(
+    snippet: 'መልአኩ ቅዱስ ገብርኤል ለእመቤታችን አምላክን እንደምትወልድ ያበሰረበት ታላቅ ዓመታዊ በዓል።',
+    fullStory: 'መልአኩ ቅዱስ ገብርኤል ለእመቤታችን አምላክን እንደምትወልድ ያበሰረበት ታላቅ ዓመታዊ በዓል።',
+  ),
+  '4-23': SynaxariumEntry(
+    snippet: 'የሰማዕቱ የቅዱስ ጊዮርጊስ ወርሃዊ በዓል።',
+    fullStory: 'የሰማዕቱ የቅዱስ ጊዮርጊስ ወርሃዊ በዓል።',
+  ),
+  '4-24': SynaxariumEntry(
+    snippet: 'የጻድቁ የአቡነ ተክለ ሃይማኖት ወርሃዊ ረድኤት።',
+    fullStory: 'የጻድቁ የአቡነ ተክለ ሃይማኖት ወርሃዊ ረድኤት።',
+  ),
+  '4-25': SynaxariumEntry(
+    snippet: 'የሰማዕቱ የቅዱስ መርቆሬዎስ ወርሃዊ ውዳሴ።',
+    fullStory: 'የሰማዕቱ የቅዱስ መርቆሬዎስ ወርሃዊ ውዳሴ።',
+  ),
+  '4-26': SynaxariumEntry(
+    snippet: 'የቅዱስ ቶማስ ወርሃዊ የሐዋርያነት ታሪክ።',
+    fullStory: 'የቅዱስ ቶማስ ወርሃዊ የሐዋርያነት ታሪክ።',
+  ),
+  '4-27': SynaxariumEntry(
+    snippet: 'የመድኃኔዓለም ወርሃዊ የስቅለት መታሰቢያ።',
+    fullStory: 'የመድኃኔዓለም ወርሃዊ የስቅለት መታሰቢያ።',
+  ),
+  '4-28': SynaxariumEntry(
+    snippet: 'የጌታችን የአማኑኤል ወርሃዊ ምስጋና።',
+    fullStory: 'የጌታችን የአማኑኤል ወርሃዊ ምስጋና።',
   ),
   '4-29': SynaxariumEntry(
-    snippet: 'ገና የጌታችን ኢየሱስ ክርስቶስ የልደት በዓል ሲሆን፣ ለሰው ልጅ ድነት የመጣው ቀን ነው።',
-    fullStory: 'ይህ ታላቅ በዓል የአምላካችን ኢየሱስ ክርስቶስ በቤተልሔም ከቅድስት ድንግል ማርያም እንደተወለደ የሚያስታውስ ነው። መላእክት ለእረኞች የምስራች ብስራት አወጁ፣ ሰብአ ሰገልም ከምስራቅ መጥተው ሰገዱለት። ይህ የእግዚአብሔር ሰው የመሆን ምስጢር በዓል ለክርስቲያኖች ሁሉ የተስፋና የደስታ ምልክት ነው። በኢትዮጵያ ኦርቶዶክስ ቤተ ክርስቲያን ይህ በዓል በታላቅ ድምቀት ይከበራል።',
+    snippet: 'ጌታችንና መድኃኒታችን ኢየሱስ ክርስቶስ በቤተልሔም በሥጋ የተወለደበት ታላቅ ዓመታዊ በዓል።',
+    fullStory: 'ጌታችንና መድኃኒታችን ኢየሱስ ክርስቶስ በቤተልሔም በሥጋ የተወለደበት ታላቅ ዓመታዊ በዓል።',
+  ),
+  '4-30': SynaxariumEntry(
+    snippet: 'የቅዱስ ማርቆስ ወርሃዊ የወንጌል አገልግሎት።',
+    fullStory: 'የቅዱስ ማርቆስ ወርሃዊ የወንጌል አገልግሎት።',
+  ),
+  '5-1': SynaxariumEntry(
+    snippet: 'የእመቤታችን የልደት ወርሃዊ በዓል።',
+    fullStory: 'የእመቤታችን የልደት ወርሃዊ በዓል።',
+  ),
+  '5-2': SynaxariumEntry(
+    snippet: 'የቅዱስ ታዴዎስ ወርሃዊ የሰማዕትነት ክብር።',
+    fullStory: 'የቅዱስ ታዴዎስ ወርሃዊ የሰማዕትነት ክብር።',
+  ),
+  '5-3': SynaxariumEntry(
+    snippet: 'የእመቤታችን ወደ መቅደስ መግባት ወርሃዊ መታሰቢያ።',
+    fullStory: 'የእመቤታችን ወደ መቅደስ መግባት ወርሃዊ መታሰቢያ።',
+  ),
+  '5-4': SynaxariumEntry(
+    snippet: 'የፍቅር ሐዋርያና ወንጌላዊው ቅዱስ ዮሐንስ በሰላም ተሰውሮ ያረፈበት ታላቅ ዓመታዊ በዓል።',
+    fullStory: 'የፍቅር ሐዋርያና ወንጌላዊው ቅዱስ ዮሐንስ በሰላም ተሰውሮ ያረፈበት ታላቅ ዓመታዊ በዓል።',
+  ),
+  '5-5': SynaxariumEntry(
+    snippet: 'የአቡነ ገብረ መንፈስ ቅዱስ ወርሃዊ ተጋድሎ።',
+    fullStory: 'የአቡነ ገብረ መንፈስ ቅዱስ ወርሃዊ ተጋድሎ።',
+  ),
+  '5-6': SynaxariumEntry(
+    snippet: 'የቅድስት ቤተሰብ የስደት ወርሃዊ በዓል።',
+    fullStory: 'የቅድስት ቤተሰብ የስደት ወርሃዊ በዓል።',
+  ),
+  '5-7': SynaxariumEntry(
+    snippet: 'ሥላሴ በአብርሃም ቤት ተገኝተው በረከትንና ልጅን የሰጡበት ታላቅ ዓመታዊ በዓል።',
+    fullStory: 'ሥላሴ በአብርሃም ቤት ተገኝተው በረከትንና ልጅን የሰጡበት ታላቅ ዓመታዊ በዓል።',
+  ),
+  '5-8': SynaxariumEntry(
+    snippet: 'የጻድቁ አባ ኪሮስ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የጻድቁ አባ ኪሮስ ወርሃዊ መታሰቢያ።',
+  ),
+  '5-9': SynaxariumEntry(
+    snippet: 'የ318ቱ የኒቅያ ሊቃውንት ወርሃዊ ክብር።',
+    fullStory: 'የ318ቱ የኒቅያ ሊቃውንት ወርሃዊ ክብር።',
+  ),
+  '5-10': SynaxariumEntry(
+    snippet: 'የክርስቶስ መስቀል ወርሃዊ ምስጋና።',
+    fullStory: 'የክርስቶስ መስቀል ወርሃዊ ምስጋና።',
   ),
   '5-11': SynaxariumEntry(
-    snippet: 'ጥምቀተ ባሕር የጌታችን ኢየሱስ ክርስቶስ በዮርዳኖስ ወንዝ የተጠመቀበት ታላቅ በዓል ነው።',
-    fullStory: 'በዚህ ቀን ጌታችን ኢየሱስ ክርስቶስ በቅዱስ ዮሐንስ መጥምቅ እጅ በዮርዳኖስ ወንዝ ተጠመቀ። በዚያ ቅጽበት መንፈስ ቅዱስ በርግብ አምሳል ወረደ፣ የአባት ድምጽም ከሰማይ ተሰማ፣ "የምወድደው ልጄ ይህ ነው" ሲል። ይህ የስላሴ መገለጥ (ኤፒፋንያ) በዓል ተብሎ ይታወቅ ሲሆን፣ በኢትዮጵያ በታላቅ ድምቀት፣ በውሃ መርጨትና በዝማሬ ይከበራል። የጥምቀት ምስጢር ለሰው ልጅ የነጻነትና የአዲስ ሕይወት ምልክት ነው።',
+    snippet: 'ጌታችን በዮርዳኖስ ወንዝ በዮሐንስ እጅ የተጠመቀበትና ምስጢረ ሥላሴ የተገለጠበት ታላቅ ዓመታዊ በዓል።',
+    fullStory: 'ጌታችን በዮርዳኖስ ወንዝ በዮሐንስ እጅ የተጠመቀበትና ምስጢረ ሥላሴ የተገለጠበት ታላቅ ዓመታዊ በዓል።',
+  ),
+  '5-12': SynaxariumEntry(
+    snippet: 'ጌታችን ውሃውን ወደ ወይን የለወጠበት የመጀመሪያው ተአምርና የቅዱስ ሚካኤል ጥበቃ ታላቅ ዓመታዊ በዓል።',
+    fullStory: 'ጌታችን ውሃውን ወደ ወይን የለወጠበት የመጀመሪያው ተአምርና የቅዱስ ሚካኤል ጥበቃ ታላቅ ዓመታዊ በዓል።',
+  ),
+  '5-13': SynaxariumEntry(
+    snippet: 'ለእግዚአብሔር አብ የሚቀርብ የወርሃዊ ቅዳሴ።',
+    fullStory: 'ለእግዚአብሔር አብ የሚቀርብ የወርሃዊ ቅዳሴ።',
+  ),
+  '5-14': SynaxariumEntry(
+    snippet: 'የአባታችን የአቡነ አረጋዊ ወርሃዊ ተአምራት።',
+    fullStory: 'የአባታችን የአቡነ አረጋዊ ወርሃዊ ተአምራት።',
+  ),
+  '5-15': SynaxariumEntry(
+    snippet: 'የቅዱስ ቂርቆስና የኢየሉጣ ወርሃዊ ረድኤት።',
+    fullStory: 'የቅዱስ ቂርቆስና የኢየሉጣ ወርሃዊ ረድኤት።',
+  ),
+  '5-16': SynaxariumEntry(
+    snippet: 'የእመቤታችን የቃልኪዳን ወርሃዊ በረከት።',
+    fullStory: 'የእመቤታችን የቃልኪዳን ወርሃዊ በረከት።',
+  ),
+  '5-17': SynaxariumEntry(
+    snippet: 'የቅዱስ እስጢፋኖስ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱስ እስጢፋኖስ ወርሃዊ መታሰቢያ።',
+  ),
+  '5-18': SynaxariumEntry(
+    snippet: 'የአቡነ ኤዎስጣቴዎስ ወርሃዊ የቅድስና ገድል።',
+    fullStory: 'የአቡነ ኤዎስጣቴዎስ ወርሃዊ የቅድስና ገድል።',
+  ),
+  '5-19': SynaxariumEntry(
+    snippet: 'የቅዱስ ገብርኤል ወርሃዊ የብስራት በዓል።',
+    fullStory: 'የቅዱስ ገብርኤል ወርሃዊ የብስራት በዓል።',
+  ),
+  '5-20': SynaxariumEntry(
+    snippet: 'የቅዱሳን ሁሉ ማኅበርና ጸሎት ማሰብ።',
+    fullStory: 'የቅዱሳን ሁሉ ማኅበርና ጸሎት ማሰብ።',
+  ),
+  '5-21': SynaxariumEntry(
+    snippet: 'የእመቤታችን የቅድስት ድንግል ማርያም የዕረፍት ታላቅ ዓመታዊ በዓል።',
+    fullStory: 'የእመቤታችን የቅድስት ድንግል ማርያም የዕረፍት ታላቅ ዓመታዊ በዓል።',
+  ),
+  '5-22': SynaxariumEntry(
+    snippet: 'የቅዱስ ደቅስዮስ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱስ ደቅስዮስ ወርሃዊ መታሰቢያ።',
+  ),
+  '5-23': SynaxariumEntry(
+    snippet: 'የቅዱስ ጊዮርጊስ ክቡር ዓጽም ወደ ልዳ የፈለሰበት ታላቅ ዓመታዊ በዓል።',
+    fullStory: 'የቅዱስ ጊዮርጊስ ክቡር ዓጽም ወደ ልዳ የፈለሰበት ታላቅ ዓመታዊ በዓል።',
+  ),
+  '5-24': SynaxariumEntry(
+    snippet: 'የአቡነ ተክለ ሃይማኖት ወርሃዊ ገድል።',
+    fullStory: 'የአቡነ ተክለ ሃይማኖት ወርሃዊ ገድል።',
+  ),
+  '5-25': SynaxariumEntry(
+    snippet: 'የቅዱስ መርቆሬዎስ ወርሃዊ የድል በዓል።',
+    fullStory: 'የቅዱስ መርቆሬዎስ ወርሃዊ የድል በዓል።',
+  ),
+  '5-26': SynaxariumEntry(
+    snippet: 'የቅዱስ ቶማስ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱስ ቶማስ ወርሃዊ መታሰቢያ።',
+  ),
+  '5-27': SynaxariumEntry(
+    snippet: 'የመድኃኔዓለም ወርሃዊ የምሕረት በዓል።',
+    fullStory: 'የመድኃኔዓለም ወርሃዊ የምሕረት በዓል።',
+  ),
+  '5-28': SynaxariumEntry(
+    snippet: 'የጌታችን የአማኑኤል ወርሃዊ ውዳሴ።',
+    fullStory: 'የጌታችን የአማኑኤል ወርሃዊ ውዳሴ።',
+  ),
+  '5-29': SynaxariumEntry(
+    snippet: 'የእግዚአብሔር ወልድ መለኮታዊ ሥራዎች ማሰብ።',
+    fullStory: 'የእግዚአብሔር ወልድ መለኮታዊ ሥራዎች ማሰብ።',
+  ),
+  '5-30': SynaxariumEntry(
+    snippet: 'የቅዱስ ማርቆስ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱስ ማርቆስ ወርሃዊ መታሰቢያ።',
+  ),
+  '6-1': SynaxariumEntry(
+    snippet: 'የእመቤታችን የልደት ወርሃዊ በዓል።',
+    fullStory: 'የእመቤታችን የልደት ወርሃዊ በዓል።',
+  ),
+  '6-2': SynaxariumEntry(
+    snippet: 'የቅዱስ ታዴዎስ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱስ ታዴዎስ ወርሃዊ መታሰቢያ።',
+  ),
+  '6-3': SynaxariumEntry(
+    snippet: 'የእመቤታችን ወደ መቅደስ መግባት ወርሃዊ በዓል።',
+    fullStory: 'የእመቤታችን ወደ መቅደስ መግባት ወርሃዊ በዓል።',
+  ),
+  '6-4': SynaxariumEntry(
+    snippet: 'የቅዱስ ዮሐንስ ወንጌላዊ ወርሃዊ ክብር።',
+    fullStory: 'የቅዱስ ዮሐንስ ወንጌላዊ ወርሃዊ ክብር።',
+  ),
+  '6-5': SynaxariumEntry(
+    snippet: 'የአቡነ ገብረ መንፈስ ቅዱስ ወርሃዊ ረድኤት።',
+    fullStory: 'የአቡነ ገብረ መንፈስ ቅዱስ ወርሃዊ ረድኤት።',
+  ),
+  '6-6': SynaxariumEntry(
+    snippet: 'የቅድስት ቤተሰብ የስደት ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅድስት ቤተሰብ የስደት ወርሃዊ መታሰቢያ።',
+  ),
+  '6-7': SynaxariumEntry(
+    snippet: 'የቅድስት ሥላሴ መለኮታዊ ምስጋና።',
+    fullStory: 'የቅድስት ሥላሴ መለኮታዊ ምስጋና።',
+  ),
+  '6-8': SynaxariumEntry(
+    snippet: 'የጻድቁ አባ ኪሮስ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የጻድቁ አባ ኪሮስ ወርሃዊ መታሰቢያ።',
+  ),
+  '6-9': SynaxariumEntry(
+    snippet: 'የ318ቱ የኒቅያ አባቶች ወርሃዊ ክብር።',
+    fullStory: 'የ318ቱ የኒቅያ አባቶች ወርሃዊ ክብር።',
+  ),
+  '6-10': SynaxariumEntry(
+    snippet: 'የክርስቶስ መስቀል ወርሃዊ ምስጋና።',
+    fullStory: 'የክርስቶስ መስቀል ወርሃዊ ምስጋና።',
+  ),
+  '6-11': SynaxariumEntry(
+    snippet: 'ታላቁ መኮንን ቅዱስ ፋሲለደስ ስለ ክርስቶስ እምነት ሰማዕት የሆነበት ታላቅ ዓመታዊ በዓል።',
+    fullStory: 'ታላቁ መኮንን ቅዱስ ፋሲለደስ ስለ ክርስቶስ እምነት ሰማዕት የሆነበት ታላቅ ዓመታዊ በዓል።',
+  ),
+  '6-12': SynaxariumEntry(
+    snippet: 'የቅዱስ ሚካኤል ወርሃዊ የጥበቃ በዓል።',
+    fullStory: 'የቅዱስ ሚካኤል ወርሃዊ የጥበቃ በዓል።',
+  ),
+  '6-13': SynaxariumEntry(
+    snippet: 'ለእግዚአብሔር አብ የሚቀርብ የቅዳሴ ጸሎት።',
+    fullStory: 'ለእግዚአብሔር አብ የሚቀርብ የቅዳሴ ጸሎት።',
+  ),
+  '6-14': SynaxariumEntry(
+    snippet: 'የአባታችን የአቡነ አረጋዊ ወርሃዊ በረከት።',
+    fullStory: 'የአባታችን የአቡነ አረጋዊ ወርሃዊ በረከት።',
+  ),
+  '6-15': SynaxariumEntry(
+    snippet: 'የቅዱስ ቂርቆስና የኢየሉጣ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱስ ቂርቆስና የኢየሉጣ ወርሃዊ መታሰቢያ።',
+  ),
+  '6-16': SynaxariumEntry(
+    snippet: 'እመቤታችን ከልጇ ታላቅ የይቅርታና የምሕረት ቃልኪዳን የተቀበለችበት ታላቅ ዓመታዊ በዓል።',
+    fullStory: 'እመቤታችን ከልጇ ታላቅ የይቅርታና የምሕረት ቃልኪዳን የተቀበለችበት ታላቅ ዓመታዊ በዓል።',
+  ),
+  '6-17': SynaxariumEntry(
+    snippet: 'የቅዱስ እስጢፋኖስ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱስ እስጢፋኖስ ወርሃዊ መታሰቢያ።',
+  ),
+  '6-18': SynaxariumEntry(
+    snippet: 'የአቡነ ኤዎስጣቴዎስ ወርሃዊ ገድል።',
+    fullStory: 'የአቡነ ኤዎስጣቴዎስ ወርሃዊ ገድል።',
+  ),
+  '6-19': SynaxariumEntry(
+    snippet: 'የቅዱስ ገብርኤል ወርሃዊ የረዳትነት በዓል።',
+    fullStory: 'የቅዱስ ገብርኤል ወርሃዊ የረዳትነት በዓል።',
+  ),
+  '6-20': SynaxariumEntry(
+    snippet: 'የቅዱሳን ሁሉ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱሳን ሁሉ ወርሃዊ መታሰቢያ።',
+  ),
+  '6-21': SynaxariumEntry(
+    snippet: 'የእመቤታችን የቅድስት ድንግል ማርያም ወርሃዊ ውዳሴ።',
+    fullStory: 'የእመቤታችን የቅድስት ድንግል ማርያም ወርሃዊ ውዳሴ።',
+  ),
+  '6-22': SynaxariumEntry(
+    snippet: 'የቅዱስ ደቅስዮስ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱስ ደቅስዮስ ወርሃዊ መታሰቢያ።',
+  ),
+  '6-23': SynaxariumEntry(
+    snippet: 'ቅዱስ ጊዮርጊስ በረዳትነት የተገለጠበትና ታላቁ የዓድዋ ድል የተገኘበት ታላቅ ዓመታዊ በዓል።',
+    fullStory: 'ቅዱስ ጊዮርጊስ በረዳትነት የተገለጠበትና ታላቁ የዓድዋ ድል የተገኘበት ታላቅ ዓመታዊ በዓል።',
+  ),
+  '6-24': SynaxariumEntry(
+    snippet: 'የጻድቁ የአቡነ ተክለ ሃይማኖት ወርሃዊ ረድኤት።',
+    fullStory: 'የጻድቁ የአቡነ ተክለ ሃይማኖት ወርሃዊ ረድኤት።',
+  ),
+  '6-25': SynaxariumEntry(
+    snippet: 'የቅዱስ መርቆሬዎስ ወርሃዊ የድል በዓል።',
+    fullStory: 'የቅዱስ መርቆሬዎስ ወርሃዊ የድል በዓል።',
+  ),
+  '6-26': SynaxariumEntry(
+    snippet: 'የቅዱስ ቶማስ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱስ ቶማስ ወርሃዊ መታሰቢያ።',
+  ),
+  '6-27': SynaxariumEntry(
+    snippet: 'የመድኃኔዓለም ወርሃዊ የምሕረት በዓል።',
+    fullStory: 'የመድኃኔዓለም ወርሃዊ የምሕረት በዓል።',
+  ),
+  '6-28': SynaxariumEntry(
+    snippet: 'የጌታችን የአማኑኤል ወርሃዊ ውዳሴ።',
+    fullStory: 'የጌታችን የአማኑኤል ወርሃዊ ውዳሴ።',
+  ),
+  '6-29': SynaxariumEntry(
+    snippet: 'የእግዚአብሔር ወልድ መለኮታዊ ሥራዎች ማሰብ።',
+    fullStory: 'የእግዚአብሔር ወልድ መለኮታዊ ሥራዎች ማሰብ።',
+  ),
+  '6-30': SynaxariumEntry(
+    snippet: 'የቅዱስ ማርቆስ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱስ ማርቆስ ወርሃዊ መታሰቢያ።',
+  ),
+  '7-1': SynaxariumEntry(
+    snippet: 'የእመቤታችን የልደት ወርሃዊ በዓል።',
+    fullStory: 'የእመቤታችን የልደት ወርሃዊ በዓል።',
+  ),
+  '7-2': SynaxariumEntry(
+    snippet: 'የቅዱስ ታዴዎስ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱስ ታዴዎስ ወርሃዊ መታሰቢያ።',
+  ),
+  '7-3': SynaxariumEntry(
+    snippet: 'የእመቤታችን ወደ መቅደስ መግባት ወርሃዊ በዓል።',
+    fullStory: 'የእመቤታችን ወደ መቅደስ መግባት ወርሃዊ በዓል።',
+  ),
+  '7-4': SynaxariumEntry(
+    snippet: 'የቅዱስ ዮሐንስ ወንጌላዊ ወርሃዊ ክብር።',
+    fullStory: 'የቅዱስ ዮሐንስ ወንጌላዊ ወርሃዊ ክብር።',
+  ),
+  '7-5': SynaxariumEntry(
+    snippet: 'የታላቁ ጻድቅ አባታችን የአቡነ ገብረ መንፈስ ቅዱስ ታላቅ ዓመታዊ የዕረፍት በዓል።',
+    fullStory: 'የታላቁ ጻድቅ አባታችን የአቡነ ገብረ መንፈስ ቅዱስ ታላቅ ዓመታዊ የዕረፍት በዓል።',
+  ),
+  '7-6': SynaxariumEntry(
+    snippet: 'የቅድስት ቤተሰብ የስደት ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅድስት ቤተሰብ የስደት ወርሃዊ መታሰቢያ።',
+  ),
+  '7-7': SynaxariumEntry(
+    snippet: 'የቅድስት ሥላሴ መለኮታዊ ምስጋና።',
+    fullStory: 'የቅድስት ሥላሴ መለኮታዊ ምስጋና።',
+  ),
+  '7-8': SynaxariumEntry(
+    snippet: 'የጻድቁ አባ ኪሮስ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የጻድቁ አባ ኪሮስ ወርሃዊ መታሰቢያ።',
+  ),
+  '7-9': SynaxariumEntry(
+    snippet: 'የ318ቱ የኒቅያ አባቶች ወርሃዊ ክብር።',
+    fullStory: 'የ318ቱ የኒቅያ አባቶች ወርሃዊ ክብር።',
+  ),
+  '7-10': SynaxariumEntry(
+    snippet: 'የክርስቶስ መስቀል ወርሃዊ ምስጋና።',
+    fullStory: 'የክርስቶስ መስቀል ወርሃዊ ምስጋና።',
+  ),
+  '7-11': SynaxariumEntry(
+    snippet: 'የእመቤታችን ወላጆች ወርሃዊ መታሰቢያ።',
+    fullStory: 'የእመቤታችን ወላጆች ወርሃዊ መታሰቢያ።',
+  ),
+  '7-12': SynaxariumEntry(
+    snippet: 'የቅዱስ ሚካኤል ወርሃዊ የጥበቃ በዓል።',
+    fullStory: 'የቅዱስ ሚካኤል ወርሃዊ የጥበቃ በዓል።',
+  ),
+  '7-13': SynaxariumEntry(
+    snippet: 'ለእግዚአብሔር አብ የሚቀርብ የቅዳሴ ጸሎት።',
+    fullStory: 'ለእግዚአብሔር አብ የሚቀርብ የቅዳሴ ጸሎት።',
+  ),
+  '7-14': SynaxariumEntry(
+    snippet: 'የአባታችን የአቡነ አረጋዊ ወርሃዊ በረከት።',
+    fullStory: 'የአባታችን የአቡነ አረጋዊ ወርሃዊ በረከት።',
+  ),
+  '7-15': SynaxariumEntry(
+    snippet: 'የቅዱስ ቂርቆስና የኢየሉጣ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱስ ቂርቆስና የኢየሉጣ ወርሃዊ መታሰቢያ።',
+  ),
+  '7-16': SynaxariumEntry(
+    snippet: 'የእመቤታችን የቃልኪዳን ወርሃዊ በረከት።',
+    fullStory: 'የእመቤታችን የቃልኪዳን ወርሃዊ በረከት።',
+  ),
+  '7-17': SynaxariumEntry(
+    snippet: 'የቅዱስ እስጢፋኖስ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱስ እስጢፋኖስ ወርሃዊ መታሰቢያ።',
+  ),
+  '7-18': SynaxariumEntry(
+    snippet: 'የአቡነ ኤዎስጣቴዎስ ወርሃዊ ገድል።',
+    fullStory: 'የአቡነ ኤዎስጣቴዎስ ወርሃዊ ገድል።',
+  ),
+  '7-19': SynaxariumEntry(
+    snippet: 'የቅዱስ ገብርኤል ወርሃዊ የረዳትነት በዓል።',
+    fullStory: 'የቅዱስ ገብርኤል ወርሃዊ የረዳትነት በዓል።',
+  ),
+  '7-20': SynaxariumEntry(
+    snippet: 'የቅዱሳን ሁሉ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱሳን ሁሉ ወርሃዊ መታሰቢያ።',
+  ),
+  '7-21': SynaxariumEntry(
+    snippet: 'የእመቤታችን የቅድስት ድንግል ማርያም ወርሃዊ ውዳሴ።',
+    fullStory: 'የእመቤታችን የቅድስት ድንግል ማርያም ወርሃዊ ውዳሴ።',
+  ),
+  '7-22': SynaxariumEntry(
+    snippet: 'የቅዱስ ደቅስዮስ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱስ ደቅስዮስ ወርሃዊ መታሰቢያ።',
+  ),
+  '7-23': SynaxariumEntry(
+    snippet: 'የሰማዕቱ የቅዱስ ጊዮርጊስ ወርሃዊ በዓል።',
+    fullStory: 'የሰማዕቱ የቅዱስ ጊዮርጊስ ወርሃዊ በዓል።',
+  ),
+  '7-24': SynaxariumEntry(
+    snippet: 'የጻድቁ የአቡነ ተክለ ሃይማኖት ወርሃዊ ረድኤት።',
+    fullStory: 'የጻድቁ የአቡነ ተክለ ሃይማኖት ወርሃዊ ረድኤት።',
+  ),
+  '7-25': SynaxariumEntry(
+    snippet: 'የቅዱስ መርቆሬዎስ ወርሃዊ የድል በዓል።',
+    fullStory: 'የቅዱስ መርቆሬዎስ ወርሃዊ የድል በዓል።',
+  ),
+  '7-26': SynaxariumEntry(
+    snippet: 'የቅዱስ ቶማስ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱስ ቶማስ ወርሃዊ መታሰቢያ።',
+  ),
+  '7-27': SynaxariumEntry(
+    snippet: 'ጌታችን ስለ አዳምና ስለ ልጆቹ በጎልጎታ የተሰቀለበት ታላቅ ዓመታዊ ዕለት።',
+    fullStory: 'ጌታችን ስለ አዳምና ስለ ልጆቹ በጎልጎታ የተሰቀለበት ታላቅ ዓመታዊ ዕለት።',
+  ),
+  '7-28': SynaxariumEntry(
+    snippet: 'የጌታችን የአማኑኤል ወርሃዊ ውዳሴ።',
+    fullStory: 'የጌታችን የአማኑኤል ወርሃዊ ውዳሴ።',
+  ),
+  '7-29': SynaxariumEntry(
+    snippet: 'መልአኩ ቅዱስ ገብርኤል እመቤታችንን አምላክን እንደምትወልድ ያበሰረበት ታላቅ ዓመታዊ በዓል።',
+    fullStory: 'መልአኩ ቅዱስ ገብርኤል እመቤታችንን አምላክን እንደምትወልድ ያበሰረበት ታላቅ ዓመታዊ በዓል።',
+  ),
+  '7-30': SynaxariumEntry(
+    snippet: 'የቅዱስ ማርቆስ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱስ ማርቆስ ወርሃዊ መታሰቢያ።',
+  ),
+  '8-1': SynaxariumEntry(
+    snippet: 'የእመቤታችን የልደት ወርሃዊ በዓል።',
+    fullStory: 'የእመቤታችን የልደት ወርሃዊ በዓል።',
+  ),
+  '8-2': SynaxariumEntry(
+    snippet: 'የቅዱስ ታዴዎስ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱስ ታዴዎስ ወርሃዊ መታሰቢያ።',
+  ),
+  '8-3': SynaxariumEntry(
+    snippet: 'የእመቤታችን ወደ መቅደስ መግባት ወርሃዊ በዓል።',
+    fullStory: 'የእመቤታችን ወደ መቅደስ መግባት ወርሃዊ በዓል።',
+  ),
+  '8-4': SynaxariumEntry(
+    snippet: 'የቅዱስ ዮሐንስ ወንጌላዊ ወርሃዊ ክብር።',
+    fullStory: 'የቅዱስ ዮሐንስ ወንጌላዊ ወርሃዊ ክብር።',
+  ),
+  '8-5': SynaxariumEntry(
+    snippet: 'ቅዱስ ዮሐንስ አፈወርቅ ስለ እውነት በመቆሙ ምክንያት በግዞት ያረፈበት ታላቅ መታሰቢያ።',
+    fullStory: 'ቅዱስ ዮሐንስ አፈወርቅ ስለ እውነት በመቆሙ ምክንያት በግዞት ያረፈበት ታላቅ መታሰቢያ።',
+  ),
+  '8-6': SynaxariumEntry(
+    snippet: 'የቅድስት ቤተሰብ የስደት ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅድስት ቤተሰብ የስደት ወርሃዊ መታሰቢያ።',
+  ),
+  '8-7': SynaxariumEntry(
+    snippet: 'የቅድስት ሥላሴ መለኮታዊ ምስጋና።',
+    fullStory: 'የቅድስት ሥላሴ መለኮታዊ ምስጋና።',
+  ),
+  '8-8': SynaxariumEntry(
+    snippet: 'የጻድቁ አባ ኪሮስ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የጻድቁ አባ ኪሮስ ወርሃዊ መታሰቢያ።',
+  ),
+  '8-9': SynaxariumEntry(
+    snippet: 'የ318ቱ የኒቅያ አባቶች ወርሃዊ ክብር።',
+    fullStory: 'የ318ቱ የኒቅያ አባቶች ወርሃዊ ክብር።',
+  ),
+  '8-10': SynaxariumEntry(
+    snippet: 'የክርስቶስ መስቀል ወርሃዊ ምስጋና።',
+    fullStory: 'የክርስቶስ መስቀል ወርሃዊ ምስጋና።',
+  ),
+  '8-11': SynaxariumEntry(
+    snippet: 'የእመቤታችን ወላጆች ወርሃዊ መታሰቢያ።',
+    fullStory: 'የእመቤታችን ወላጆች ወርሃዊ መታሰቢያ።',
+  ),
+  '8-12': SynaxariumEntry(
+    snippet: 'የቅዱስ ሚካኤል ወርሃዊ የጥበቃ በዓል።',
+    fullStory: 'የቅዱስ ሚካኤል ወርሃዊ የጥበቃ በዓል።',
+  ),
+  '8-13': SynaxariumEntry(
+    snippet: 'ለእግዚአብሔር አብ የሚቀርብ የቅዳሴ ጸሎት።',
+    fullStory: 'ለእግዚአብሔር አብ የሚቀርብ የቅዳሴ ጸሎት።',
+  ),
+  '8-14': SynaxariumEntry(
+    snippet: 'የአባታችን የአቡነ አረጋዊ ወርሃዊ በረከት።',
+    fullStory: 'የአባታችን የአቡነ አረጋዊ ወርሃዊ በረከት።',
+  ),
+  '8-15': SynaxariumEntry(
+    snippet: 'የቅዱስ ቂርቆስና የኢየሉጣ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱስ ቂርቆስና የኢየሉጣ ወርሃዊ መታሰቢያ።',
+  ),
+  '8-16': SynaxariumEntry(
+    snippet: 'የእመቤታችን የቃልኪዳን ወርሃዊ በረከት።',
+    fullStory: 'የእመቤታችን የቃልኪዳን ወርሃዊ በረከት።',
+  ),
+  '8-17': SynaxariumEntry(
+    snippet: 'የቅዱስ እስጢፋኖስ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱስ እስጢፋኖስ ወርሃዊ መታሰቢያ።',
+  ),
+  '8-18': SynaxariumEntry(
+    snippet: 'የአቡነ ኤዎስጣቴዎስ ወርሃዊ ገድል።',
+    fullStory: 'የአቡነ ኤዎስጣቴዎስ ወርሃዊ ገድል።',
+  ),
+  '8-19': SynaxariumEntry(
+    snippet: 'የቅዱስ ገብርኤል ወርሃዊ የረዳትነት በዓል።',
+    fullStory: 'የቅዱስ ገብርኤል ወርሃዊ የረዳትነት በዓል።',
+  ),
+  '8-20': SynaxariumEntry(
+    snippet: 'የቅዱሳን ሁሉ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱሳን ሁሉ ወርሃዊ መታሰቢያ።',
+  ),
+  '8-21': SynaxariumEntry(
+    snippet: 'ማርያም ግብፃዊት ቀድሞ ኃጢአተኛ የነበረችና በበረሃ 47 ዓመት በንሥሐ የኖረች ታላቅ ጻድቅ ናት።',
+    fullStory: 'ማርያም ግብፃዊት ቀድሞ ኃጢአተኛ የነበረችና በበረሃ 47 ዓመት በንሥሐ የኖረች ታላቅ ጻድቅ ናት።',
+  ),
+  '8-22': SynaxariumEntry(
+    snippet: 'የቅዱስ ደቅስዮስ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱስ ደቅስዮስ ወርሃዊ መታሰቢያ።',
+  ),
+  '8-23': SynaxariumEntry(
+    snippet: 'ቅዱስ ጊዮርጊስ ለሰባት ዓመታት መከራን ታግሦ በሰይፍ የተሰየመበት ታላቅ ዓመታዊ በዓል።',
+    fullStory: 'ቅዱስ ጊዮርጊስ ለሰባት ዓመታት መከራን ታግሦ በሰይፍ የተሰየመበት ታላቅ ዓመታዊ በዓል።',
+  ),
+  '8-24': SynaxariumEntry(
+    snippet: 'የጻድቁ የአቡነ ተክለ ሃይማኖት ወርሃዊ ረድኤት።',
+    fullStory: 'የጻድቁ የአቡነ ተክለ ሃይማኖት ወርሃዊ ረድኤት።',
+  ),
+  '8-25': SynaxariumEntry(
+    snippet: 'የቅዱስ መርቆሬዎስ ወርሃዊ የድል በዓል።',
+    fullStory: 'የቅዱስ መርቆሬዎስ ወርሃዊ የድል በዓል።',
+  ),
+  '8-26': SynaxariumEntry(
+    snippet: 'የቅዱስ ቶማስ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱስ ቶማስ ወርሃዊ መታሰቢያ።',
+  ),
+  '8-27': SynaxariumEntry(
+    snippet: 'የመድኃኔዓለም ወርሃዊ የምሕረት በዓል።',
+    fullStory: 'የመድኃኔዓለም ወርሃዊ የምሕረት በዓል።',
+  ),
+  '8-28': SynaxariumEntry(
+    snippet: 'የጌታችን የአማኑኤል ወርሃዊ ውዳሴ።',
+    fullStory: 'የጌታችን የአማኑኤል ወርሃዊ ውዳሴ።',
+  ),
+  '8-29': SynaxariumEntry(
+    snippet: 'የእግዚአብሔር ወልድ መለኮታዊ ሥራዎች ማሰብ።',
+    fullStory: 'የእግዚአብሔር ወልድ መለኮታዊ ሥራዎች ማሰብ።',
+  ),
+  '8-30': SynaxariumEntry(
+    snippet: 'የቅዱስ ማርቆስ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱስ ማርቆስ ወርሃዊ መታሰቢያ።',
   ),
   '9-1': SynaxariumEntry(
-    snippet: 'ልደታ ማርያም የእመቤታችን ቅድስት ድንግል ማርያም ልደት መታሰቢያ ነው።',
-    fullStory: 'ይህ ቀን ቅድስት ድንግል ማርያም ከእናቷ ቅድስት ሐና እና ከአባቷ ኢያቄም እንደተወለደች የሚያስታውስ ነው። ቅድስት ሐናና ኢያቄም ለዓመታት ልጅ ስላልነበራቸው፣ ለእግዚአብሔር ጸልየው ቅድስት ድንግል ማርያምን ተሰጣቸው። ይህ ልደት ለሰው ልጅ ድነት መንገድ የከፈተ ታላቅ ምስጢር ነው፤ ቅድስት ድንግል ማርያም የጌታችን እናት ሆና ስለተመረጠች ይህ ቀን በታላቅ ክብር ይታሰባል።',
+    snippet: 'የእመቤታችን የቅድስት ድንግል ማርያም ታላቅ ወርሃዊ የልደት በዓል።',
+    fullStory: 'የእመቤታችን የቅድስት ድንግል ማርያም ታላቅ ወርሃዊ የልደት በዓል።',
+  ),
+  '9-2': SynaxariumEntry(
+    snippet: 'የቅዱስ ታዴዎስ ሐዋርያ ወርሃዊ የሰማዕትነት ክብር።',
+    fullStory: 'የቅዱስ ታዴዎስ ሐዋርያ ወርሃዊ የሰማዕትነት ክብር።',
+  ),
+  '9-3': SynaxariumEntry(
+    snippet: 'የእመቤታችን ወደ ቤተ መቅደስ መግባት ወርሃዊ መታሰቢያ።',
+    fullStory: 'የእመቤታችን ወደ ቤተ መቅደስ መግባት ወርሃዊ መታሰቢያ።',
+  ),
+  '9-4': SynaxariumEntry(
+    snippet: 'የቅዱስ ዮሐንስ ወንጌላዊ ወርሃዊ ክብርና ውዳሴ።',
+    fullStory: 'የቅዱስ ዮሐንስ ወንጌላዊ ወርሃዊ ክብርና ውዳሴ።',
+  ),
+  '9-5': SynaxariumEntry(
+    snippet: 'የአቡነ ገብረ መንፈስ ቅዱስ ወርሃዊ የረድኤት በዓል።',
+    fullStory: 'የአቡነ ገብረ መንፈስ ቅዱስ ወርሃዊ የረድኤት በዓል።',
+  ),
+  '9-6': SynaxariumEntry(
+    snippet: 'የቅድስት ቤተሰብ የስደት ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅድስት ቤተሰብ የስደት ወርሃዊ መታሰቢያ።',
+  ),
+  '9-7': SynaxariumEntry(
+    snippet: 'የቅድስት ሥላሴ መለኮታዊ ክብር ምስጋና።',
+    fullStory: 'የቅድስት ሥላሴ መለኮታዊ ክብር ምስጋና።',
+  ),
+  '9-8': SynaxariumEntry(
+    snippet: 'የጻድቁ አባ ኪሮስ ወርሃዊ የዕረፍት መታሰቢያ።',
+    fullStory: 'የጻድቁ አባ ኪሮስ ወርሃዊ የዕረፍት መታሰቢያ።',
+  ),
+  '9-9': SynaxariumEntry(
+    snippet: 'የ318ቱ የኒቅያ አባቶች ወርሃዊ ክብር።',
+    fullStory: 'የ318ቱ የኒቅያ አባቶች ወርሃዊ ክብር።',
+  ),
+  '9-10': SynaxariumEntry(
+    snippet: 'የክርስቶስ ክቡር መስቀል ወርሃዊ በዓልና ምስጋና።',
+    fullStory: 'የክርስቶስ ክቡር መስቀል ወርሃዊ በዓልና ምስጋና።',
+  ),
+  '9-11': SynaxariumEntry(
+    snippet: 'የኢትዮጵያ ሰማያዊ ዜማ ደራሲ ቅዱስ ያሬድ የተሰወረበት ታላቅ ዓመታዊ በዓል።',
+    fullStory: 'የኢትዮጵያ ሰማያዊ ዜማ ደራሲ ቅዱስ ያሬድ የተሰወረበት ታላቅ ዓመታዊ በዓል።',
+  ),
+  '9-12': SynaxariumEntry(
+    snippet: 'የጻድቁ አባታችን የአቡነ ተክለ ሃይማኖት ክቡር ዓጽም የፈለሰበት ታላቅ ዓመታዊ በዓል።',
+    fullStory: 'የጻድቁ አባታችን የአቡነ ተክለ ሃይማኖት ክቡር ዓጽም የፈለሰበት ታላቅ ዓመታዊ በዓል።',
+  ),
+  '9-13': SynaxariumEntry(
+    snippet: 'ለእግዚአብሔር አብ የሚቀርብ የቅዳሴ ምስጋና።',
+    fullStory: 'ለእግዚአብሔር አብ የሚቀርብ የቅዳሴ ምስጋና።',
+  ),
+  '9-14': SynaxariumEntry(
+    snippet: 'የአባታችን የአቡነ አረጋዊ ወርሃዊ በረከት።',
+    fullStory: 'የአባታችን የአቡነ አረጋዊ ወርሃዊ በረከት።',
+  ),
+  '9-15': SynaxariumEntry(
+    snippet: 'የቅዱስ ቂርቆስና የኢየሉጣ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱስ ቂርቆስና የኢየሉጣ ወርሃዊ መታሰቢያ።',
+  ),
+  '9-16': SynaxariumEntry(
+    snippet: 'የእመቤታችን የቃልኪዳን ወርሃዊ የምሕረት በዓል።',
+    fullStory: 'የእመቤታችን የቃልኪዳን ወርሃዊ የምሕረት በዓል።',
+  ),
+  '9-17': SynaxariumEntry(
+    snippet: 'የቅዱስ እስጢፋኖስ ወርሃዊ የሰማዕትነት ክብር።',
+    fullStory: 'የቅዱስ እስጢፋኖስ ወርሃዊ የሰማዕትነት ክብር።',
+  ),
+  '9-18': SynaxariumEntry(
+    snippet: 'የአቡነ ኤዎስጣቴዎስ ወርሃዊ የገድል ታሪክ።',
+    fullStory: 'የአቡነ ኤዎስጣቴዎስ ወርሃዊ የገድል ታሪክ።',
+  ),
+  '9-19': SynaxariumEntry(
+    snippet: 'የቅዱስ ገብርኤል ወርሃዊ የረዳትነት በዓል።',
+    fullStory: 'የቅዱስ ገብርኤል ወርሃዊ የረዳትነት በዓል።',
+  ),
+  '9-20': SynaxariumEntry(
+    snippet: 'የቅዱሳን ሁሉ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱሳን ሁሉ ወርሃዊ መታሰቢያ።',
+  ),
+  '9-21': SynaxariumEntry(
+    snippet: 'እመቤታችን በግብፅ ደብረ ምጥማቅ በብርሃን ተገልጣ ለብዙ ቀናት የታየችበት ታላቅ ዓመታዊ በዓል።',
+    fullStory: 'እመቤታችን በግብፅ ደብረ ምጥማቅ በብርሃን ተገልጣ ለብዙ ቀናት የታየችበት ታላቅ ዓመታዊ በዓል።',
+  ),
+  '9-22': SynaxariumEntry(
+    snippet: 'የቅዱስ ደቅስዮስ ወርሃዊ መታሰቢያና ክብር።',
+    fullStory: 'የቅዱስ ደቅስዮስ ወርሃዊ መታሰቢያና ክብር።',
+  ),
+  '9-23': SynaxariumEntry(
+    snippet: 'የሰማዕቱ የቅዱስ ጊዮርጊስ ወርሃዊ በዓል።',
+    fullStory: 'የሰማዕቱ የቅዱስ ጊዮርጊስ ወርሃዊ በዓል።',
+  ),
+  '9-24': SynaxariumEntry(
+    snippet: 'የጻድቁ የአቡነ ተክለ ሃይማኖት ወርሃዊ ረድኤት።',
+    fullStory: 'የጻድቁ የአቡነ ተክለ ሃይማኖት ወርሃዊ ረድኤት።',
+  ),
+  '9-25': SynaxariumEntry(
+    snippet: 'የቅዱስ መርቆሬዎስ ወርሃዊ ውዳሴ።',
+    fullStory: 'የቅዱስ መርቆሬዎስ ወርሃዊ ውዳሴ።',
+  ),
+  '9-26': SynaxariumEntry(
+    snippet: 'የቅዱስ ቶማስ ወርሃዊ የሐዋርያነት ታሪክ።',
+    fullStory: 'የቅዱስ ቶማስ ወርሃዊ የሐዋርያነት ታሪክ።',
+  ),
+  '9-27': SynaxariumEntry(
+    snippet: 'የመድኃኔዓለም ወርሃዊ የስቅለት መታሰቢያ።',
+    fullStory: 'የመድኃኔዓለም ወርሃዊ የስቅለት መታሰቢያ።',
+  ),
+  '9-28': SynaxariumEntry(
+    snippet: 'የጌታችን የአማኑኤል ወርሃዊ ምስጋና።',
+    fullStory: 'የጌታችን የአማኑኤል ወርሃዊ ምስጋና።',
+  ),
+  '9-29': SynaxariumEntry(
+    snippet: 'የእግዚአብሔር ወልድ መለኮታዊ ሥራዎች ማሰብ።',
+    fullStory: 'የእግዚአብሔር ወልድ መለኮታዊ ሥራዎች ማሰብ።',
+  ),
+  '9-30': SynaxariumEntry(
+    snippet: 'የቅዱስ ማርቆስ ወርሃዊ የወንጌል አገልግሎት።',
+    fullStory: 'የቅዱስ ማርቆስ ወርሃዊ የወንጌል አገልግሎት።',
+  ),
+  '10-1': SynaxariumEntry(
+    snippet: 'የእመቤታችን የልደት ወርሃዊ በዓል።',
+    fullStory: 'የእመቤታችን የልደት ወርሃዊ በዓል።',
+  ),
+  '10-2': SynaxariumEntry(
+    snippet: 'የቅዱስ ታዴዎስ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱስ ታዴዎስ ወርሃዊ መታሰቢያ።',
+  ),
+  '10-3': SynaxariumEntry(
+    snippet: 'የእመቤታችን ወደ መቅደስ መግባት ወርሃዊ በዓል።',
+    fullStory: 'የእመቤታችን ወደ መቅደስ መግባት ወርሃዊ በዓል።',
+  ),
+  '10-4': SynaxariumEntry(
+    snippet: 'የቅዱስ ዮሐንስ ወንጌላዊ ወርሃዊ ክብር።',
+    fullStory: 'የቅዱስ ዮሐንስ ወንጌላዊ ወርሃዊ ክብር።',
+  ),
+  '10-5': SynaxariumEntry(
+    snippet: 'የአቡነ ገብረ መንፈስ ቅዱስ ወርሃዊ ረድኤት።',
+    fullStory: 'የአቡነ ገብረ መንፈስ ቅዱስ ወርሃዊ ረድኤት።',
+  ),
+  '10-6': SynaxariumEntry(
+    snippet: 'የቅድስት ቤተሰብ የስደት ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅድስት ቤተሰብ የስደት ወርሃዊ መታሰቢያ።',
+  ),
+  '10-7': SynaxariumEntry(
+    snippet: 'የቅድስት ሥላሴ መለኮታዊ ምስጋና።',
+    fullStory: 'የቅድስት ሥላሴ መለኮታዊ ምስጋና።',
+  ),
+  '10-8': SynaxariumEntry(
+    snippet: 'የጻድቁ አባ ኪሮስ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የጻድቁ አባ ኪሮስ ወርሃዊ መታሰቢያ።',
+  ),
+  '10-9': SynaxariumEntry(
+    snippet: 'የ318ቱ የኒቅያ አባቶች ወርሃዊ ክብር።',
+    fullStory: 'የ318ቱ የኒቅያ አባቶች ወርሃዊ ክብር።',
+  ),
+  '10-10': SynaxariumEntry(
+    snippet: 'የክርስቶስ መስቀል ወርሃዊ ምስጋና።',
+    fullStory: 'የክርስቶስ መስቀል ወርሃዊ ምስጋና።',
+  ),
+  '10-11': SynaxariumEntry(
+    snippet: 'የእመቤታችን ወላጆች ወርሃዊ መታሰቢያ።',
+    fullStory: 'የእመቤታችን ወላጆች ወርሃዊ መታሰቢያ።',
+  ),
+  '10-12': SynaxariumEntry(
+    snippet: 'ሰኔ ሚካኤል የቅዱስ ሚካኤል ዓመታዊ በዓልና አብያተ ክርስቲያናትን ያነጸው የጻድቁ ንጉሥ ላሊበላ ዕረፍት ታላቅ ዓመታዊ በዓል።',
+    fullStory: 'ሰኔ ሚካኤል የቅዱስ ሚካኤል ዓመታዊ በዓልና አብያተ ክርስቲያናትን ያነጸው የጻድቁ ንጉሥ ላሊበላ ዕረፍት ታላቅ ዓመታዊ በዓል።',
+  ),
+  '10-13': SynaxariumEntry(
+    snippet: 'ለእግዚአብሔር አብ የሚቀርብ የቅዳሴ ጸሎት።',
+    fullStory: 'ለእግዚአብሔር አብ የሚቀርብ የቅዳሴ ጸሎት።',
+  ),
+  '10-14': SynaxariumEntry(
+    snippet: 'የአባታችን የአቡነ አረጋዊ ወርሃዊ በረከት።',
+    fullStory: 'የአባታችን የአቡነ አረጋዊ ወርሃዊ በረከት።',
+  ),
+  '10-15': SynaxariumEntry(
+    snippet: 'የቅዱስ ቂርቆስና የኢየሉጣ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱስ ቂርቆስና የኢየሉጣ ወርሃዊ መታሰቢያ።',
+  ),
+  '10-16': SynaxariumEntry(
+    snippet: 'የእመቤታችን የቃልኪዳን ወርሃዊ በረከት።',
+    fullStory: 'የእመቤታችን የቃልኪዳን ወርሃዊ በረከት።',
+  ),
+  '10-17': SynaxariumEntry(
+    snippet: 'የቅዱስ እስጢፋኖስ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱስ እስጢፋኖስ ወርሃዊ መታሰቢያ።',
+  ),
+  '10-18': SynaxariumEntry(
+    snippet: 'የአቡነ ኤዎስጣቴዎስ ወርሃዊ ገድል።',
+    fullStory: 'የአቡነ ኤዎስጣቴዎስ ወርሃዊ ገድል።',
+  ),
+  '10-19': SynaxariumEntry(
+    snippet: 'የቅዱስ ገብርኤል ወርሃዊ የረዳትነት በዓል።',
+    fullStory: 'የቅዱስ ገብርኤል ወርሃዊ የረዳትነት በዓል።',
+  ),
+  '10-20': SynaxariumEntry(
+    snippet: 'የቅዱሳን ሁሉ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱሳን ሁሉ ወርሃዊ መታሰቢያ።',
+  ),
+  '10-21': SynaxariumEntry(
+    snippet: 'ጌታችን ለእመቤታችን በጎልጎታ ታላቅና ታሪካዊ የይቅርታ ቃልኪዳን የሰጣት ታላቅ ዓመታዊ በዓል።',
+    fullStory: 'ጌታችን ለእመቤታችን በጎልጎታ ታላቅና ታሪካዊ የይቅርታ ቃልኪዳን የሰጣት ታላቅ ዓመታዊ በዓል።',
+  ),
+  '10-22': SynaxariumEntry(
+    snippet: 'የቅዱስ ደቅስዮስ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱስ ደቅስዮስ ወርሃዊ መታሰቢያ።',
+  ),
+  '10-23': SynaxariumEntry(
+    snippet: 'የሰማዕቱ የቅዱስ ጊዮርጊስ ወርሃዊ በዓል።',
+    fullStory: 'የሰማዕቱ የቅዱስ ጊዮርጊስ ወርሃዊ በዓል።',
+  ),
+  '10-24': SynaxariumEntry(
+    snippet: 'የጻድቁ የአቡነ ተክለ ሃይማኖት ወርሃዊ ረድኤት።',
+    fullStory: 'የጻድቁ የአቡነ ተክለ ሃይማኖት ወርሃዊ ረድኤት።',
+  ),
+  '10-25': SynaxariumEntry(
+    snippet: 'የቅዱስ መርቆሬዎስ ወርሃዊ የድል በዓል።',
+    fullStory: 'የቅዱስ መርቆሬዎስ ወርሃዊ የድል በዓል።',
+  ),
+  '10-26': SynaxariumEntry(
+    snippet: 'የቅዱስ ቶማስ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱስ ቶማስ ወርሃዊ መታሰቢያ።',
+  ),
+  '10-27': SynaxariumEntry(
+    snippet: 'የመድኃኔዓለም ወርሃዊ የምሕረት በዓል።',
+    fullStory: 'የመድኃኔዓለም ወርሃዊ የምሕረት በዓል።',
+  ),
+  '10-28': SynaxariumEntry(
+    snippet: 'የጌታችን የአማኑኤል ወርሃዊ ውዳሴ።',
+    fullStory: 'የጌታችን የአማኑኤል ወርሃዊ ውዳሴ።',
+  ),
+  '10-29': SynaxariumEntry(
+    snippet: 'የእግዚአብሔር ወልድ መለኮታዊ ሥራዎች ማሰብ።',
+    fullStory: 'የእግዚአብሔር ወልድ መለኮታዊ ሥራዎች ማሰብ።',
+  ),
+  '10-30': SynaxariumEntry(
+    snippet: 'የመጥምቁ ቅዱስ ዮሐንስ መጥምቅ የተወለደበት ታላቅ ዓመታዊ በዓል።',
+    fullStory: 'የመጥምቁ ቅዱስ ዮሐንስ መጥምቅ የተወለደበት ታላቅ ዓመታዊ በዓል።',
+  ),
+  '11-1': SynaxariumEntry(
+    snippet: 'የእመቤታችን የልደት ወርሃዊ በዓል።',
+    fullStory: 'የእመቤታችን የልደት ወርሃዊ በዓል።',
+  ),
+  '11-2': SynaxariumEntry(
+    snippet: 'የቅዱስ ታዴዎስ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱስ ታዴዎስ ወርሃዊ መታሰቢያ።',
+  ),
+  '11-3': SynaxariumEntry(
+    snippet: 'የእመቤታችን ወደ መቅደስ መግባት ወርሃዊ በዓል።',
+    fullStory: 'የእመቤታችን ወደ መቅደስ መግባት ወርሃዊ በዓል።',
+  ),
+  '11-4': SynaxariumEntry(
+    snippet: 'የቅዱስ ዮሐንስ ወንጌላዊ ወርሃዊ ክብር።',
+    fullStory: 'የቅዱስ ዮሐንስ ወንጌላዊ ወርሃዊ ክብር።',
+  ),
+  '11-5': SynaxariumEntry(
+    snippet: 'የሐዋርያት አለቆች በሮም ምድር በሰማዕትነት ያረፉበት ታላቅ ዕለት።',
+    fullStory: 'የሐዋርያት አለቆች በሮም ምድር በሰማዕትነት ያረፉበት ታላቅ ዕለት።',
+  ),
+  '11-6': SynaxariumEntry(
+    snippet: 'የቅድስት ቤተሰብ የስደት ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅድስት ቤተሰብ የስደት ወርሃዊ መታሰቢያ።',
+  ),
+  '11-7': SynaxariumEntry(
+    snippet: 'የቅድስት ሥላሴ መለኮታዊ ምስጋና።',
+    fullStory: 'የቅድስት ሥላሴ መለኮታዊ ምስጋና።',
+  ),
+  '11-8': SynaxariumEntry(
+    snippet: 'የጻድቁ አባ ኪሮስ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የጻድቁ አባ ኪሮስ ወርሃዊ መታሰቢያ።',
+  ),
+  '11-9': SynaxariumEntry(
+    snippet: 'የ318ቱ የኒቅያ አባቶች ወርሃዊ ክብር።',
+    fullStory: 'የ318ቱ የኒቅያ አባቶች ወርሃዊ ክብር።',
+  ),
+  '11-10': SynaxariumEntry(
+    snippet: 'የክርስቶስ መስቀል ወርሃዊ ምስጋና።',
+    fullStory: 'የክርስቶስ መስቀል ወርሃዊ ምስጋና።',
+  ),
+  '11-11': SynaxariumEntry(
+    snippet: 'የእመቤታችን ወላጆች ወርሃዊ መታሰቢያ።',
+    fullStory: 'የእመቤታችን ወላጆች ወርሃዊ መታሰቢያ።',
+  ),
+  '11-12': SynaxariumEntry(
+    snippet: 'የቅዱስ ሚካኤል ወርሃዊ የጥበቃ በዓል።',
+    fullStory: 'የቅዱስ ሚካኤል ወርሃዊ የጥበቃ በዓል።',
+  ),
+  '11-13': SynaxariumEntry(
+    snippet: 'ለእግዚአብሔር አብ የሚቀርብ የቅዳሴ ጸሎት።',
+    fullStory: 'ለእግዚአብሔር አብ የሚቀርብ የቅዳሴ ጸሎት።',
+  ),
+  '11-14': SynaxariumEntry(
+    snippet: 'የአባታችን የአቡነ አረጋዊ ወርሃዊ በረከት።',
+    fullStory: 'የአባታችን የአቡነ አረጋዊ ወርሃዊ በረከት።',
+  ),
+  '11-15': SynaxariumEntry(
+    snippet: 'የቅዱስ ቂርቆስና የኢየሉጣ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱስ ቂርቆስና የኢየሉጣ ወርሃዊ መታሰቢያ።',
+  ),
+  '11-16': SynaxariumEntry(
+    snippet: 'የእመቤታችን የቃልኪዳን ወርሃዊ በረከት።',
+    fullStory: 'የእመቤታችን የቃልኪዳን ወርሃዊ በረከት።',
+  ),
+  '11-17': SynaxariumEntry(
+    snippet: 'የቅዱስ እስጢፋኖስ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱስ እስጢፋኖስ ወርሃዊ መታሰቢያ።',
+  ),
+  '11-18': SynaxariumEntry(
+    snippet: 'የአቡነ ኤዎስጣቴዎስ ወርሃዊ ገድል።',
+    fullStory: 'የአቡነ ኤዎስጣቴዎስ ወርሃዊ ገድል።',
+  ),
+  '11-19': SynaxariumEntry(
+    snippet: 'ቅዱስ ገብርኤል ሠለስቱ ደቂቅን ከሚነድ እሳት ያዳነበት ታላቅ ዓመታዊ በዓል።',
+    fullStory: 'ቅዱስ ገብርኤል ሠለስቱ ደቂቅን ከሚነድ እሳት ያዳነበት ታላቅ ዓመታዊ በዓል።',
+  ),
+  '11-20': SynaxariumEntry(
+    snippet: 'የቅዱሳን ሁሉ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱሳን ሁሉ ወርሃዊ መታሰቢያ።',
+  ),
+  '11-21': SynaxariumEntry(
+    snippet: 'የእመቤታችን የቅድስት ድንግል ማርያም ወርሃዊ ውዳሴ።',
+    fullStory: 'የእመቤታችን የቅድስት ድንግል ማርያም ወርሃዊ ውዳሴ።',
+  ),
+  '11-22': SynaxariumEntry(
+    snippet: 'የቅዱስ ደቅስዮስ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱስ ደቅስዮስ ወርሃዊ መታሰቢያ።',
+  ),
+  '11-23': SynaxariumEntry(
+    snippet: 'የሰማዕቱ የቅዱስ ጊዮርጊስ ወርሃዊ በዓል።',
+    fullStory: 'የሰማዕቱ የቅዱስ ጊዮርጊስ ወርሃዊ በዓል።',
+  ),
+  '11-24': SynaxariumEntry(
+    snippet: 'የጻድቁ የአቡነ ተክለ ሃይማኖት ወርሃዊ ረድኤት።',
+    fullStory: 'የጻድቁ የአቡነ ተክለ ሃይማኖት ወርሃዊ ረድኤት።',
+  ),
+  '11-25': SynaxariumEntry(
+    snippet: 'የቅዱስ መርቆሬዎስ ወርሃዊ የድል በዓል።',
+    fullStory: 'የቅዱስ መርቆሬዎስ ወርሃዊ የድል በዓል።',
+  ),
+  '11-26': SynaxariumEntry(
+    snippet: 'የቅዱስ ቶማስ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱስ ቶማስ ወርሃዊ መታሰቢያ።',
+  ),
+  '11-27': SynaxariumEntry(
+    snippet: 'የመድኃኔዓለም ወርሃዊ የምሕረት በዓል።',
+    fullStory: 'የመድኃኔዓለም ወርሃዊ የምሕረት በዓል።',
+  ),
+  '11-28': SynaxariumEntry(
+    snippet: 'የጌታችን የአማኑኤል ወርሃዊ ውዳሴ።',
+    fullStory: 'የጌታችን የአማኑኤል ወርሃዊ ውዳሴ።',
+  ),
+  '11-29': SynaxariumEntry(
+    snippet: 'የእግዚአብሔር ወልድ መለኮታዊ ሥራዎች ማሰብ።',
+    fullStory: 'የእግዚአብሔር ወልድ መለኮታዊ ሥራዎች ማሰብ።',
+  ),
+  '11-30': SynaxariumEntry(
+    snippet: 'የቅዱስ ማርቆስ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱስ ማርቆስ ወርሃዊ መታሰቢያ።',
+  ),
+  '12-1': SynaxariumEntry(
+    snippet: 'ጾመ ፍልሰታ መግቢያ፤ የእመቤታችንን ትንሣኤና ዕርገት ለማየት ሐዋርያት የጾሙት ጾም መታሰቢያ።',
+    fullStory: 'ጾመ ፍልሰታ መግቢያ፤ የእመቤታችንን ትንሣኤና ዕርገት ለማየት ሐዋርያት የጾሙት ጾም መታሰቢያ።',
+  ),
+  '12-2': SynaxariumEntry(
+    snippet: 'በጾመ ፍልሰታ ወቅት የቅዱስ ታዴዎስን ወርሃዊ ሐዋርያዊ አገልግሎት ማሰብ።',
+    fullStory: 'በጾመ ፍልሰታ ወቅት የቅዱስ ታዴዎስን ወርሃዊ ሐዋርያዊ አገልግሎት ማሰብ።',
+  ),
+  '12-3': SynaxariumEntry(
+    snippet: 'በጾመ ፍልሰታ ወቅት የእመቤታችንን ቤተ መቅደስ መግባት ማሰብ።',
+    fullStory: 'በጾመ ፍልሰታ ወቅት የእመቤታችንን ቤተ መቅደስ መግባት ማሰብ።',
+  ),
+  '12-4': SynaxariumEntry(
+    snippet: 'በጾመ ፍልሰታ ወቅት የቅዱስ ዮሐንስ ወንጌላዊ ረቂቅ ፍቅር ማሰብ።',
+    fullStory: 'በጾመ ፍልሰታ ወቅት የቅዱስ ዮሐንስ ወንጌላዊ ረቂቅ ፍቅር ማሰብ።',
+  ),
+  '12-5': SynaxariumEntry(
+    snippet: 'ጻድቁ አባታችን አቡነ ገብረ መንፈስ ቅዱስ በጾም የኖሩት ሕይወት ማሰብ።',
+    fullStory: 'ጻድቁ አባታችን አቡነ ገብረ መንፈስ ቅዱስ በጾም የኖሩት ሕይወት ማሰብ።',
+  ),
+  '12-6': SynaxariumEntry(
+    snippet: 'በጾመ ፍልሰታ ወቅት የቅድስት ቤተሰብን ረቂቅ ስደት ማሰብ።',
+    fullStory: 'በጾመ ፍልሰታ ወቅት የቅድስት ቤተሰብን ረቂቅ ስደት ማሰብ።',
+  ),
+  '12-7': SynaxariumEntry(
+    snippet: 'በጾም ወቅት ለቅድስት ሥላሴ የሚቀርብ ልዩ የአምልኮ ምስጋና።',
+    fullStory: 'በጾም ወቅት ለቅድስት ሥላሴ የሚቀርብ ልዩ የአምልኮ ምስጋና።',
+  ),
+  '12-8': SynaxariumEntry(
+    snippet: 'የጻድቁ የአባ ኪሮስን ታላቅ የገዳም ጾም በትሕትና ማሰብ።',
+    fullStory: 'የጻድቁ የአባ ኪሮስን ታላቅ የገዳም ጾም በትሕትና ማሰብ።',
+  ),
+  '12-9': SynaxariumEntry(
+    snippet: 'የ318ቱ ሊቃውንት የሃይማኖት ውሳኔዎችን በጾም ማሰብ።',
+    fullStory: 'የ318ቱ ሊቃውንት የሃይማኖት ውሳኔዎችን በጾም ማሰብ።',
+  ),
+  '12-10': SynaxariumEntry(
+    snippet: 'የጌታ መስቀል ለጾማችን ኃይልና መጽናኛ እንዲሆን ማሰብ።',
+    fullStory: 'የጌታ መስቀል ለጾማችን ኃይልና መጽናኛ እንዲሆን ማሰብ።',
+  ),
+  '12-11': SynaxariumEntry(
+    snippet: 'የእመቤታችን እናት የቅድስት ሐናን ጽኑ ጸሎት ማሰብ።',
+    fullStory: 'የእመቤታችን እናት የቅድስት ሐናን ጽኑ ጸሎት ማሰብ።',
+  ),
+  '12-12': SynaxariumEntry(
+    snippet: 'የሊቀ መላእክት የቅዱስ ሚካኤል ጥበቃ ለጾማችን ስኬት ማሰብ።',
+    fullStory: 'የሊቀ መላእክት የቅዱስ ሚካኤል ጥበቃ ለጾማችን ስኬት ማሰብ።',
   ),
   '12-13': SynaxariumEntry(
-    snippet: 'ቡሄ ጌታችን ኢየሱስ ክርስቶስ በደብረ ታቦር ብርሃኑን ለሐዋርያት ያሳየበት ቀን ነው።',
-    fullStory: 'ይህ በዓል ጌታችን ኢየሱስ ክርስቶስ ከጴጥሮስ፣ ከያዕቆብና ከዮሐንስ ጋር ወደ ደብረ ታቦር ተራራ ወጥቶ፣ ክብሩን ያሳያቸው ቀን ነው። ፊቱ እንደ ፀሐይ በራ፣ ልብሱም እንደ በረዶ ነጭ ሆነ። ሙሴና ኤልያስም ከእርሱ ጋር ተገለጡ። ይህ የጌታችን አምላክነት መገለጥ ለሐዋርያት ትልቅ እምነት ሰጣቸው። በኢትዮጵያ ይህ በዓል ቡሄ ተብሎ ይከበራል፤ ልጆችም ችቦ በማብራት ይዘፍናሉ።',
+    snippet: 'ጌታችን በታቦር ተራራ መለኮታዊ ክብሩንና ብርሃኑን የገለጠበት ታላቅ ዓመታዊ በዓል።',
+    fullStory: 'ጌታችን በታቦር ተራራ መለኮታዊ ክብሩንና ብርሃኑን የገለጠበት ታላቅ ዓመታዊ በዓል።',
+  ),
+  '12-14': SynaxariumEntry(
+    snippet: 'በጾመ ፍልሰታ ወቅት የአቡነ አረጋዊን ረድኤት ማሰብ።',
+    fullStory: 'በጾመ ፍልሰታ ወቅት የአቡነ አረጋዊን ረድኤት ማሰብ።',
+  ),
+  '12-15': SynaxariumEntry(
+    snippet: 'በጾም ወቅት የሕፃኑን ቂርቆስን የሰማዕትነት ጽናት ማሰብ።',
+    fullStory: 'በጾም ወቅት የሕፃኑን ቂርቆስን የሰማዕትነት ጽናት ማሰብ።',
   ),
   '12-16': SynaxariumEntry(
-    snippet: 'ፍልሰታ ማርያም የእመቤታችን ቅድስት ድንግል ማርያም ዕርገት ወደ ሰማይ መታሰቢያ ነው።',
-    fullStory: 'ከ16 ቀን ጾም በኋላ የሚከበረው ይህ በዓል፣ የቅድስት ድንግል ማርያም ሥጋ ከሞት በኋላ ወደ ሰማይ ማረጉን ያስታውሳል። ሐዋርያት ለቅድስት ድንግል ማርያም የቀብር ሥርዓት ሲፈጽሙ፣ ከ3 ቀን በኋላ መቃብሯ ባዶ ሆኖ ተገኘ፤ ይህም እመቤታችን በሥጋዋ ወደ ሰማይ ማረገች ብለው አምነዋል። ይህ በዓል ለቅድስት ድንግል ማርያም ካላት ልዩ ክብር የተነሳ በታላቅ ጾምና ጸሎት ይከበራል።',
+    snippet: 'የእመቤታችን ቅዱስ ሥጋ ከፈረሰበት ተነሥቶ ወደ ሰማይ ያረገበት ታላቅ ዓመታዊ በዓል።',
+    fullStory: 'የእመቤታችን ቅዱስ ሥጋ ከፈረሰበት ተነሥቶ ወደ ሰማይ ያረገበት ታላቅ ዓመታዊ በዓል።',
+  ),
+  '12-17': SynaxariumEntry(
+    snippet: 'የቅዱስ እስጢፋኖስ ወርሃዊ የዲያቆናት በዓል።',
+    fullStory: 'የቅዱስ እስጢፋኖስ ወርሃዊ የዲያቆናት በዓል።',
+  ),
+  '12-18': SynaxariumEntry(
+    snippet: 'የአባታችን የአቡነ ኤዎስጣቴዎስ ወርሃዊ በረከት።',
+    fullStory: 'የአባታችን የአቡነ ኤዎስጣቴዎስ ወርሃዊ በረከት።',
+  ),
+  '12-19': SynaxariumEntry(
+    snippet: 'የቅዱስ ገብርኤል ወርሃዊ የጥበቃና የብስራት በዓል።',
+    fullStory: 'የቅዱስ ገብርኤል ወርሃዊ የጥበቃና የብስራት በዓል።',
+  ),
+  '12-20': SynaxariumEntry(
+    snippet: 'የቅዱሳን ሁሉ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱሳን ሁሉ ወርሃዊ መታሰቢያ።',
+  ),
+  '12-21': SynaxariumEntry(
+    snippet: 'የእመቤታችን የቅድስት ድንግል ማርያም ወርሃዊ ውዳሴ።',
+    fullStory: 'የእመቤታችን የቅድስት ድንግል ማርያም ወርሃዊ ውዳሴ።',
+  ),
+  '12-22': SynaxariumEntry(
+    snippet: 'የቅዱስ ደቅስዮስ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱስ ደቅስዮስ ወርሃዊ መታሰቢያ።',
+  ),
+  '12-23': SynaxariumEntry(
+    snippet: 'የሰማዕቱ የቅዱስ ጊዮርጊስ ወርሃዊ በዓል።',
+    fullStory: 'የሰማዕቱ የቅዱስ ጊዮርጊስ ወርሃዊ በዓል።',
+  ),
+  '12-24': SynaxariumEntry(
+    snippet: 'የታላቁ አባታችን የኢትዮጵያ ብርሃን አቡነ ተክለሃይማኖት የዕረፍት ታላቅ ዓመታዊ በዓል።',
+    fullStory: 'የታላቁ አባታችን የኢትዮጵያ ብርሃን አቡነ ተክለሃይማኖት የዕረፍት ታላቅ ዓመታዊ በዓል።',
+  ),
+  '12-25': SynaxariumEntry(
+    snippet: 'የቅዱስ መርቆሬዎስ ወርሃዊ የድል በዓል።',
+    fullStory: 'የቅዱስ መርቆሬዎስ ወርሃዊ የድል በዓል።',
+  ),
+  '12-26': SynaxariumEntry(
+    snippet: 'የቅዱስ ቶማስ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱስ ቶማስ ወርሃዊ መታሰቢያ።',
+  ),
+  '12-27': SynaxariumEntry(
+    snippet: 'የመድኃኔዓለም ወርሃዊ የምሕረት በዓል።',
+    fullStory: 'የመድኃኔዓለም ወርሃዊ የምሕረት በዓል።',
+  ),
+  '12-28': SynaxariumEntry(
+    snippet: 'የጌታችን የአማኑኤል ወርሃዊ ውዳሴ።',
+    fullStory: 'የጌታችን የአማኑኤል ወርሃዊ ውዳሴ።',
+  ),
+  '12-29': SynaxariumEntry(
+    snippet: 'የእግዚአብሔር ወልድ መለኮታዊ ሥራዎች ማሰብ።',
+    fullStory: 'የእግዚአብሔር ወልድ መለኮታዊ ሥራዎች ማሰብ።',
+  ),
+  '12-30': SynaxariumEntry(
+    snippet: 'የቅዱስ ማርቆስ ወርሃዊ መታሰቢያ።',
+    fullStory: 'የቅዱስ ማርቆስ ወርሃዊ መታሰቢያ።',
+  ),
+  '13-1': SynaxariumEntry(
+    snippet: 'ቅዱስ ዑራኤል ለቅዱስ ዕዝራ የጥበብን ጽዋ ያጠጣበትና የጌታን ደም በአለም የረጨበት ታላቅ በዓል።',
+    fullStory: 'ቅዱስ ዑራኤል ለቅዱስ ዕዝራ የጥበብን ጽዋ ያጠጣበትና የጌታን ደም በአለም የረጨበት ታላቅ በዓል።',
+  ),
+  '13-2': SynaxariumEntry(
+    snippet: 'የቅዱስ አናንያል መላእክት ወርሃዊ መታሰቢያና ጥበቃ።',
+    fullStory: 'የቅዱስ አናንያል መላእክት ወርሃዊ መታሰቢያና ጥበቃ።',
+  ),
+  '13-3': SynaxariumEntry(
+    snippet: 'በዓሣ አንበሪ ላይ የተመሠረተችውን ቤተክርስቲያን ያጸናበትና የፈውስ መልአክ ታላቅ በዓል።',
+    fullStory: 'በዓሣ አንበሪ ላይ የተመሠረተችውን ቤተክርስቲያን ያጸናበትና የፈውስ መልአክ ታላቅ በዓል።',
+  ),
+  '13-4': SynaxariumEntry(
+    snippet: 'በሰማያት ያሉ መላእክት ሰራዊት ሁሉ በአንድነት ፈጣሪያቸውን የሚያመሰግኑበት ታላቅ ዕለት።',
+    fullStory: 'በሰማያት ያሉ መላእክት ሰራዊት ሁሉ በአንድነት ፈጣሪያቸውን የሚያመሰግኑበት ታላቅ ዕለት።',
+  ),
+  '13-5': SynaxariumEntry(
+    snippet: 'የጻድቁ ነቢዩ አሞጽ ዕረፍትና የተለመደው የዓመቱ የመጨረሻ መዝጊያ ቀን።',
+    fullStory: 'የጻድቁ ነቢዩ አሞጽ ዕረፍትና የተለመደው የዓመቱ የመጨረሻ መዝጊያ ቀን።',
+  ),
+  '13-6': SynaxariumEntry(
+    snippet: 'ይህች ቀን በየ4 ዓመቱ የምትመጣ ልዩ የ366ኛው ቀን የዘመን መተላለፊያ ናት፤ እግዚአብሔር ለአዲስ ዘመን ስላበቃን ታላቅ ምስጋና ይቀርባል።',
+    fullStory: 'ይህች ቀን በየ4 ዓመቱ የምትመጣ ልዩ የ366ኛው ቀን የዘመን መተላለፊያ ናት፤ እግዚአብሔር ለአዲስ ዘመን ስላበቃን ታላቅ ምስጋና ይቀርባል።',
   ),
 };
+
 
 SynaxariumEntry? getSynaxarium(int month, int day) {
   return synaxariumStories['$month-$day'];
@@ -2791,36 +4209,69 @@ class _CalendarScreenState extends State<CalendarScreen> with SingleTickerProvid
           Builder(builder: (ctx) {
             final feast = getEotcDay(_viewMonth, _selectedDay!);
             final isAnnual = feast?.isAnnual ?? false;
-            return Container(
-              margin: const EdgeInsets.fromLTRB(14, 12, 14, 4),
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: isAnnual ? c.goldBg : c.card,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: isAnnual ? c.gold : c.border, width: isAnnual ? 1.5 : 0.5),
-              ),
-              child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Container(
-                  width: 44, height: 44,
-                  decoration: BoxDecoration(color: c.goldBg, borderRadius: BorderRadius.circular(12), border: Border.all(color: c.gold, width: 0.5)),
-                  child: Center(child: Text(isAnnual ? '⭐' : '☩', style: TextStyle(fontSize: 20, color: c.gold))),
+            final synaxarium = getSynaxarium(_viewMonth, _selectedDay!);
+            return GestureDetector(
+              onTap: () {
+                Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => SaintStoryScreen(
+                    isDark: widget.isDark,
+                    feastName: feast?.name ?? 'No feast recorded for this day',
+                    dateLabel: '$monthAmharic $_selectedDay',
+                    isAnnual: isAnnual,
+                    story: synaxarium?.fullStory,
+                  ),
+                ));
+              },
+              child: Container(
+                margin: const EdgeInsets.fromLTRB(14, 12, 14, 4),
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: isAnnual ? c.goldBg : c.card,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: isAnnual ? c.gold : c.border, width: isAnnual ? 1.5 : 0.5),
                 ),
-                const SizedBox(width: 12),
-                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('$monthAmharic $_selectedDay', style: TextStyle(fontSize: 11, color: c.muted)),
-                  const SizedBox(height: 4),
-                  Text(feast != null ? feast.name : 'No feast recorded for this day',
-                    style: TextStyle(fontSize: 15, color: c.text, fontWeight: FontWeight.w700)),
-                  if (isAnnual) ...[
-                    const SizedBox(height: 4),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                      decoration: BoxDecoration(color: c.gold.withAlpha(30), borderRadius: BorderRadius.circular(8)),
-                      child: Text('ዓመታዊ በዓል', style: TextStyle(fontSize: 10, color: c.gold, fontWeight: FontWeight.w700)),
+                      width: 44, height: 44,
+                      decoration: BoxDecoration(color: c.goldBg, borderRadius: BorderRadius.circular(12), border: Border.all(color: c.gold, width: 0.5)),
+                      child: Center(child: Text(isAnnual ? '⭐' : '☩', style: TextStyle(fontSize: 20, color: c.gold))),
                     ),
+                    const SizedBox(width: 12),
+                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text('$monthAmharic $_selectedDay', style: TextStyle(fontSize: 11, color: c.muted)),
+                      const SizedBox(height: 4),
+                      Text(feast != null ? feast.name : 'No feast recorded for this day',
+                        style: TextStyle(fontSize: 15, color: c.text, fontWeight: FontWeight.w700)),
+                      if (isAnnual) ...[
+                        const SizedBox(height: 4),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(color: c.gold.withAlpha(30), borderRadius: BorderRadius.circular(8)),
+                          child: Text('ዓመታዊ በዓል', style: TextStyle(fontSize: 10, color: c.gold, fontWeight: FontWeight.w700)),
+                        ),
+                      ],
+                    ])),
+                    Icon(Icons.chevron_right, color: c.muted, size: 20),
+                  ]),
+                  if (synaxarium != null) ...[
+                    const SizedBox(height: 10),
+                    Container(height: 0.5, color: c.border),
+                    const SizedBox(height: 10),
+                    Text(
+                      synaxarium.snippet,
+                      style: TextStyle(fontSize: 12, color: c.muted, height: 1.5),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 6),
+                    Text('📖 Tap to read the Synaxarium →', style: TextStyle(fontSize: 11, color: c.gold, fontWeight: FontWeight.w600)),
+                  ] else if (feast != null) ...[
+                    const SizedBox(height: 8),
+                    Text('📖 Tap to view details', style: TextStyle(fontSize: 11, color: c.muted, fontStyle: FontStyle.italic)),
                   ],
-                ])),
-              ]),
+                ]),
+              ),
             );
           }),
         // ── Annual feasts list ──
@@ -3251,11 +4702,8 @@ class _PriestScreenState extends State<PriestScreen> {
       }
       final list = allChurches.toList();
       list.sort((a, b) => (a['dist'] as double).compareTo(b['dist'] as double));
-      if (list.isNotEmpty) {
-        setState(() { _churches = list; _loadingChurches = false; });
-      } else {
-        setState(() { _loadingChurches = false; });
-      }
+      if (list.isNotEmpty) setState(() { _churches = list; _loadingChurches = false; });
+      else setState(() { _loadingChurches = false; });
     } catch (e) {
       // Keep existing churches if API fails
     }
@@ -3286,7 +4734,7 @@ class _PriestScreenState extends State<PriestScreen> {
 
   void _openGoogleMapsSearch() async {
     if (_userLat == null) return;
-    final url = Uri.parse('https://www.google.com/maps/search/Ethiopian+Orthodox+Church/@$_userLat,$_userLng,14z');
+    final url = Uri.parse('https://www.google.com/maps/search/Ethiopian+Orthodox+Church/@${_userLat},${_userLng},14z');
     if (await canLaunchUrl(url)) await launchUrl(url, mode: LaunchMode.externalApplication);
   }
 
@@ -3366,7 +4814,7 @@ class _PriestScreenState extends State<PriestScreen> {
                           initialCenter: LatLng(_userLat ?? 9.0227, _userLng ?? 38.7468),
                           initialZoom: 13.5,
                           minZoom: 3, maxZoom: 19,
-                          onTap: (_, _) => setState(() => _selected = null),
+                          onTap: (_, __) => setState(() => _selected = null),
                         ),
                         children: [
                           TileLayer(
@@ -3450,7 +4898,7 @@ class _PriestScreenState extends State<PriestScreen> {
                             const SizedBox(width: 10),
                             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                               Text(_selected!['name'] as String, style: TextStyle(fontSize: 13, color: c.text, fontWeight: FontWeight.w800), maxLines: 2, overflow: TextOverflow.ellipsis),
-                              Text('${_dist(_selected!).toStringAsFixed(1)} km away', style: TextStyle(fontSize: 11, color: c.gold, fontWeight: FontWeight.w600)),
+                              Text(_dist(_selected!).toStringAsFixed(1) + ' km away', style: TextStyle(fontSize: 11, color: c.gold, fontWeight: FontWeight.w600)),
                             ])),
                             GestureDetector(onTap: () => _openDirections(_selected!), child: Container(
                               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -3498,7 +4946,7 @@ class _PriestScreenState extends State<PriestScreen> {
                       if (_userLat != null) Row(children: [
                         Icon(Icons.location_on, color: c.gold, size: 11),
                         const SizedBox(width: 2),
-                        Text('${dist.toStringAsFixed(1)} km away', style: TextStyle(fontSize: 11, color: c.gold, fontWeight: FontWeight.w600)),
+                        Text(dist.toStringAsFixed(1) + ' km away', style: TextStyle(fontSize: 11, color: c.gold, fontWeight: FontWeight.w600)),
                       ]),
                     ])),
                     GestureDetector(
@@ -3824,7 +5272,7 @@ class _MoreScreenState extends State<MoreScreen> {
                   Text('Prayer Notifications', style: TextStyle(fontSize: 14, color: c.text, fontWeight: FontWeight.w600)),
                   Text('Church bell at prayer times', style: TextStyle(fontSize: 12, color: c.muted)),
                 ])),
-                Switch(value: _notificationsEnabled, onChanged: _saveNotif, activeThumbColor: c.gold),
+                Switch(value: _notificationsEnabled, onChanged: _saveNotif, activeColor: c.gold),
               ]),
             ),
           ]),
