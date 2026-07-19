@@ -129,7 +129,9 @@ class EthiopianCalendar {
   static int daysInYear(int y) => isLeapYear(y) ? 366 : 365;
   static int dayOfYear(int d, int m, int y) {
     int t = 0;
-    for (int i = 1; i < m; i++) t += daysInMonth(i, y);
+    for (int i = 1; i < m; i++) {
+      t += daysInMonth(i, y);
+    }
     return t + d;
   }
   static EthiopianDate fromGregorian(DateTime g) {
@@ -475,7 +477,7 @@ class _SignInScreenState extends State<SignInScreen> {
     final contactMatch = profile.contact.trim().toLowerCase() == contact.toLowerCase();
 
     if (!contactMatch) {
-      _showError('No account found with that phone/email. You registered with: ' + profile.contact);
+      _showError('No account found with that phone/email. You registered with: ${profile.contact}');
       return;
     }
 
@@ -1007,7 +1009,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           backgroundColor: c.card,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: Text(label, style: TextStyle(color: c.text, fontWeight: FontWeight.w700)),
-          content: Text('Current: ' + current + '. What would you like to do?', style: TextStyle(color: c.muted, fontSize: 13)),
+          content: Text('Current: $current. What would you like to do?', style: TextStyle(color: c.muted, fontSize: 13)),
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx, 'remove'), child: Text('Remove', style: TextStyle(color: c.red))),
             TextButton(onPressed: () => Navigator.pop(ctx, 'cancel'), child: Text('Cancel', style: TextStyle(color: c.muted))),
@@ -1050,7 +1052,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     if (picked != null) {
       final h = picked.hour.toString().padLeft(2, '0');
       final m = picked.minute.toString().padLeft(2, '0');
-      onSave(h + ':' + m);
+      onSave('$h:$m');
     }
   }
 
@@ -1278,7 +1280,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           builder: (_) => SaintStoryScreen(
             isDark: widget.isDark,
             feastName: todayFeast?.name ?? 'No feast today',
-            dateLabel: _today.monthNameAmharic + ' ' + _today.day.toString() + ', ' + _today.year.toString(),
+            dateLabel: '${_today.monthNameAmharic} ${_today.day}, ${_today.year}',
             isAnnual: isAnnual,
             story: synaxarium?.fullStory,
           ),
@@ -1308,7 +1310,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
               ),
               const SizedBox(height: 4),
               Text(
-                _today.monthNameAmharic + ' ' + _today.day.toString() + ', ' + _today.year.toString(),
+                '${_today.monthNameAmharic} ${_today.day}, ${_today.year}',
                 style: TextStyle(fontSize: 12, color: c.muted, fontStyle: FontStyle.italic),
               ),
               if (isAnnual) ...[
@@ -1377,8 +1379,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
               GestureDetector(
                 onTap: () => _showTimeDialog(label, time, (newTime) async {
                   setState(() {
-                    if (key == 'prayer_morning') _morningTime = newTime;
-                    else if (key == 'prayer_noon') _noonTime = newTime;
+                    if (key == 'prayer_morning') {
+                      _morningTime = newTime;
+                    } else if (key == 'prayer_noon') _noonTime = newTime;
                     else if (key == 'prayer_evening') _eveningTime = newTime;
                     else _nightTime = newTime;
                   });
@@ -1624,7 +1627,9 @@ class _ConfessScreenState extends State<ConfessScreen> with SingleTickerProvider
     await prefs.remove('confession_saved_at');
     await prefs.setString('last_confession', now.toIso8601String());
     setState(() {
-      for (int i = 0; i < sins.length; i++) _checked[i] = false;
+      for (int i = 0; i < sins.length; i++) {
+        _checked[i] = false;
+      }
       _saved = false; _savedAt = null;
     });
     if (!mounted) return;
@@ -1646,7 +1651,9 @@ class _ConfessScreenState extends State<ConfessScreen> with SingleTickerProvider
     await prefs.setBool('confession_saved', false);
     await prefs.remove('confession_saved_at');
     setState(() {
-      for (int i = 0; i < sins.length; i++) _checked[i] = false;
+      for (int i = 0; i < sins.length; i++) {
+        _checked[i] = false;
+      }
       _saved = false; _savedAt = null;
     });
   }
@@ -4702,8 +4709,11 @@ class _PriestScreenState extends State<PriestScreen> {
       }
       final list = allChurches.toList();
       list.sort((a, b) => (a['dist'] as double).compareTo(b['dist'] as double));
-      if (list.isNotEmpty) setState(() { _churches = list; _loadingChurches = false; });
-      else setState(() { _loadingChurches = false; });
+      if (list.isNotEmpty) {
+        setState(() { _churches = list; _loadingChurches = false; });
+      } else {
+        setState(() { _loadingChurches = false; });
+      }
     } catch (e) {
       // Keep existing churches if API fails
     }
@@ -4734,7 +4744,7 @@ class _PriestScreenState extends State<PriestScreen> {
 
   void _openGoogleMapsSearch() async {
     if (_userLat == null) return;
-    final url = Uri.parse('https://www.google.com/maps/search/Ethiopian+Orthodox+Church/@${_userLat},${_userLng},14z');
+    final url = Uri.parse('https://www.google.com/maps/search/Ethiopian+Orthodox+Church/@$_userLat,$_userLng,14z');
     if (await canLaunchUrl(url)) await launchUrl(url, mode: LaunchMode.externalApplication);
   }
 
@@ -4814,7 +4824,7 @@ class _PriestScreenState extends State<PriestScreen> {
                           initialCenter: LatLng(_userLat ?? 9.0227, _userLng ?? 38.7468),
                           initialZoom: 13.5,
                           minZoom: 3, maxZoom: 19,
-                          onTap: (_, __) => setState(() => _selected = null),
+                          onTap: (_, _) => setState(() => _selected = null),
                         ),
                         children: [
                           TileLayer(
@@ -4898,7 +4908,7 @@ class _PriestScreenState extends State<PriestScreen> {
                             const SizedBox(width: 10),
                             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                               Text(_selected!['name'] as String, style: TextStyle(fontSize: 13, color: c.text, fontWeight: FontWeight.w800), maxLines: 2, overflow: TextOverflow.ellipsis),
-                              Text(_dist(_selected!).toStringAsFixed(1) + ' km away', style: TextStyle(fontSize: 11, color: c.gold, fontWeight: FontWeight.w600)),
+                              Text('${_dist(_selected!).toStringAsFixed(1)} km away', style: TextStyle(fontSize: 11, color: c.gold, fontWeight: FontWeight.w600)),
                             ])),
                             GestureDetector(onTap: () => _openDirections(_selected!), child: Container(
                               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -4946,7 +4956,7 @@ class _PriestScreenState extends State<PriestScreen> {
                       if (_userLat != null) Row(children: [
                         Icon(Icons.location_on, color: c.gold, size: 11),
                         const SizedBox(width: 2),
-                        Text(dist.toStringAsFixed(1) + ' km away', style: TextStyle(fontSize: 11, color: c.gold, fontWeight: FontWeight.w600)),
+                        Text('${dist.toStringAsFixed(1)} km away', style: TextStyle(fontSize: 11, color: c.gold, fontWeight: FontWeight.w600)),
                       ]),
                     ])),
                     GestureDetector(
@@ -5272,7 +5282,7 @@ class _MoreScreenState extends State<MoreScreen> {
                   Text('Prayer Notifications', style: TextStyle(fontSize: 14, color: c.text, fontWeight: FontWeight.w600)),
                   Text('Church bell at prayer times', style: TextStyle(fontSize: 12, color: c.muted)),
                 ])),
-                Switch(value: _notificationsEnabled, onChanged: _saveNotif, activeColor: c.gold),
+                Switch(value: _notificationsEnabled, onChanged: _saveNotif, activeThumbColor: c.gold),
               ]),
             ),
           ]),
