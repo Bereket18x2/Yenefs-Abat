@@ -386,11 +386,17 @@ class _YenefsAbatAppState extends State<YenefsAbatApp> {
     _loadProfile();
   }
 
+  // Onboarding is tracked per-account (per Firebase uid), not per-device —
+  // otherwise, once any account dismisses the tour, a brand new account
+  // signing up on the same phone would never see it.
+  Future<bool> _tourNotSeenBy(String uid) async {
+    final prefs = await SharedPreferences.getInstance();
+    return !(prefs.getBool('onboarding_done_$uid') ?? false);
+  }
+
   Future<void> _loadProfile() async {
     final prefs = await SharedPreferences.getInstance();
     fontSizeNotifier.value = prefs.getDouble('font_size') ?? 1.0;
-    final onboarded = prefs.getBool('onboarding_done') ?? false;
-    _showOnboarding = !onboarded;
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user != null) {
@@ -405,6 +411,7 @@ class _YenefsAbatAppState extends State<YenefsAbatApp> {
         final doc = await FirebaseFirestore.instance.collection('users').doc(fresh!.uid).get();
         if (doc.exists) {
           final data = doc.data()!;
+          final showTour = await _tourNotSeenBy(fresh.uid);
           setState(() {
             _profile = UserProfile(
               name: data['name'] ?? '',
@@ -416,6 +423,7 @@ class _YenefsAbatAppState extends State<YenefsAbatApp> {
               verified: fresh.emailVerified,
             );
             _needsLogin = false;
+            _showOnboarding = showTour;
             _profileLoaded = true;
           });
           return;
@@ -428,12 +436,17 @@ class _YenefsAbatAppState extends State<YenefsAbatApp> {
   }
 
   void _onProfileSaved(UserProfile p) async {
-    setState(() { _profile = p; _needsLogin = false; });
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    final showTour = uid != null && await _tourNotSeenBy(uid);
+    setState(() { _profile = p; _needsLogin = false; _showOnboarding = showTour; });
   }
 
   Future<void> _finishOnboarding() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('onboarding_done', true);
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('onboarding_done_$uid', true);
+    }
     setState(() => _showOnboarding = false);
   }
 
@@ -6350,19 +6363,6 @@ class _PriestScreenState extends State<PriestScreen> with TickerProviderStateMix
                     ),
                   )),
                   const SizedBox(width: 10),
-                  GestureDetector(
-                    onTap: () => _openDirections(_sel!),
-                    child: Container(
-                      width: 46, height: 46,
-                      decoration: BoxDecoration(
-                        color: muted.withAlpha(28),
-                        borderRadius: BorderRadius.circular(15),
-                        border: Border.all(color: muted.withAlpha(60), width: 0.8),
-                      ),
-                      child: Icon(Icons.map_outlined, color: onGlass, size: 19),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
                   Expanded(flex: 2, child: GestureDetector(
                     onTap: () => _sharePlace(_sel!),
                     child: Container(
@@ -6901,6 +6901,22 @@ class _MoreScreenState extends State<MoreScreen> {
 // PRAYER LIBRARY — የጸሎት መጽሐፍ
 // ═══════════════════════════════════════════════
 
+// A named part within a multi-part prayer (e.g. a booklet like Zewter
+// Tselot bundles several distinct prayers together, each with its own
+// title). Leave a PrayerItem's `sections` empty for a single-block prayer.
+class PrayerSection {
+  final String titleAmharic;
+  final String titleGeez;
+  final String geezText;
+  final String amharicText;
+  const PrayerSection({
+    required this.titleAmharic,
+    required this.titleGeez,
+    required this.geezText,
+    required this.amharicText,
+  });
+}
+
 class PrayerItem {
   final String id;
   final String titleGeez;
@@ -6909,6 +6925,7 @@ class PrayerItem {
   final String timeOfDay;
   final String geezText;
   final String amharicTranslation;
+  final List<PrayerSection> sections;
   const PrayerItem({
     required this.id,
     required this.titleGeez,
@@ -6917,6 +6934,7 @@ class PrayerItem {
     required this.timeOfDay,
     required this.geezText,
     required this.amharicTranslation,
+    this.sections = const [],
   });
 }
 
@@ -6929,6 +6947,43 @@ const List<PrayerItem> orthodoxPrayerSource = [
     timeOfDay: 'Morning / Evening',
     geezText: 'አቡነ ዘበሰማያት ይትቀደስ ስምከ፤ ትምጻእ መንግሥትከ፤ ወይኩን ፈቃድከ በከመ በሰማይ ከማሁ በምድር፤ ሲሳየነ ዘለለ ዕለትነ ሀበነ ዮም፤ ኅድግ ለነ አበሳነ ወጌጋየነ ከመ ንሕነኒ ንኅድግ ለዘአበሰ ለነ፤ ኢታብኦነ እግዚኦ ውስተ መንሱት፤ አላ አድኅነነ ወባልሐነ እምኩሉ እኩይ፤ እስመ ዚአከ ይእቲ መንግሥት ኃይል ወስብሐት ለዓለመ ዓለም አሜን።',
     amharicTranslation: 'በሰማያት የምትኖር አባታችን ሆይ፤ ስምህ ይቀደስ፤ መንግሥትህ ትምጣ፤ ፈቃድህ በሰማይ እንደ ሆነች እንዲሁ በምድር ትሁን፤ የዕለት እንጀራችንን ስጠን ዛሬ፤ በደላችንንም ይቅር በለን፤ እኛም የበደሉንን ይቅር እንደምንል፤ አቤቱ ወደ ፈተና አታግባን፤ ከክፉ ሁሉ አድነን እንጂ፤ መንግሥት ያንተ ናትና ኃይልም ስብሐትም ለዘለዓለሙ አሜን።',
+    // NOTE: the Creed (የሃይማኖት ጸሎት) section is intentionally left out of
+    // this list — the text supplied for it had corrupted fragments
+    // ("በብHierarchy", "በ his ዮ P ጲላጦስ") that read like a generation
+    // glitch, not real Ge'ez. Add it back once the correct wording is
+    // confirmed.
+    sections: [
+      PrayerSection(
+        titleAmharic: 'የመክፈቻ ጸሎት',
+        titleGeez: 'በስመ አብ ወወልድ ወመንፈስ ቅዱስ',
+        geezText: 'በስመ አብ ወወልድ ወመንፈስ ቅዱስ አሐዱ አምላክ አሜን።\nስብሐት ለአብ፤ ስብሐት ለወልድ፤ ስብሐት ለመንፈስ ቅዱስ። (፫ ጊዜ)\nአአምን በአሐዱ አምላክ አምላከ ጽድቅ።\nአአምን በክርስቶስ አምላኪየ ዘአንሥአኒ እምነ ሞት።\nአአምን በመንፈስ ቅዱስ ዘያሐይወነ።',
+        amharicText: 'አንድ አምላክ በሚሆን በአብ በወልድ በመንፈስ ቅዱስ ስም አሜን።\nለአብ ምስጋና ይሁን፤ ለወልድ ምስጋና ይሁን፤ ለመንፈስ ቅዱስም ምስጋና ይሁን። (3 ጊዜ)\nእውነተኛ አምላክ በሚሆን በአንድ አምላክ እምናለሁ።\nከሞት ባነሣኝ በአምላኬ በክርስቶስ እምናለሁ።\nሕይወትን በሚሰጠን በመንፈስ ቅዱስ እምናለሁ።',
+      ),
+      PrayerSection(
+        titleAmharic: 'የጌታችን ጸሎት (አባታችን ሆይ)',
+        titleGeez: 'አቡነ ዘበሰማያት',
+        geezText: 'አቡነ ዘበሰማያት፤ ይትቀደስ ስምከ፤ ትምጻእ መንግሥትከ፤ ወይኩን ፈቃድከ በከመ በሰማይ፤ ከማሁ በምድር፤ ሲሳየነ ዘለለ ዕለትነ ሀበነ ዮም፤ ኅድግ ለነ አበሳነ ወጌጋየነ፤ ከመ ንሕነኒ ንኅድግ ለዘአበሰ ለነ፤ ኢታብኦነ እግዚኦ ውስተ መንሱት፤ አላ አድኅነነ ወባልሐነ እምኩሉ እኩይ፤ እስመ ዚአከ ይእቲ መንግሥት፤ ኃይል ወስብሐት፤ ለዓለመ ዓለም አሜን።',
+        amharicText: 'በሰማያት የምትኖር አባታችን ሆይ፤ ስምህ ይቀደስ፤ መንግሥትህ ትምጣ፤ ፈቃድህ በሰማይ እንደ ሆነች እንዲሁ በምድር ትሁን፤ የዕለት እንጀራችንን ስጠን ዛሬ፤ በደላችንንም ይቅር በለን፤ እኛም የበደሉንን ይቅር እንደምንል፤ አቤቱ ወደ ፈተና አታግባን፤ ከክፉ ሁሉ አድነን እንጂ፤ መንግሥት ያንተ ናትና ኃይልም ስብሐትም ለዘለዓለሙ አሜን።',
+      ),
+      PrayerSection(
+        titleAmharic: 'የእመቤታችን ጸሎት (ሰላምታ)',
+        titleGeez: 'ሰላም ለኪ',
+        geezText: 'በሰላመ ቅዱስ ገብርኤል መልአክ፤ እግዝእትየ ማርያም ሰላም ለኪ፤ ድንግል ብኅሊናኪ ወድንግል በሥጋኪ፤ እመ እግዚአብሔር ጸባኦት ሰላም ለኪ፤ ቡሩክት አንቲ እምአንስት ወቡሩክ ፍሬ ከርሥኪ፤ ተፈሥሒ ፍሥሕት ኦ ምልእተ ጸጋ፤ እግዚአብሔር ምስሌኪ፤ ሰአሊ ወጸልዪ ምሕረተ በኀበ ፍቁር ወልድኪ፤ ኢየሱስ ክርስቶስ፤ ከመ ይሥረይ ለነ ኃጣውኢነ አሜን።',
+        amharicText: 'በቅዱስ ገብርኤል መልአክ ሰላምታ እመቤታችን ቅድስት ድንግል ማርያም ሆይ ሰላም እንልሻለን፤ በሐሳብሽ ድንግል ነሽ፤ በሥጋሽም ድንግል ነሽ፤ የሠራዊት ጌታ የእግዚአብሔር እናት ሆይ ሰላምታ ይገባሻል፤ ከሴቶች ሁሉ ተለይተሽ የተባረክሽ ነሽ፤ የሆድሽም ፍሬ የተባረከ ነው፤ ጸጋን የተሞላሽ ሆይ ደስ ይበልሽ እግዚአብሔር ከአንቺ ጋር ነውና፤ ከፍቅር ልጅሽ ከጌታችን ከኢየሱስ ክርስቶስ ዘንድ ይቅርታንና ምሕረትን ለምኚልን ኃጢአታችንንም ይሠረይልን ዘንድ ለዘለዓለሙ አሜን።',
+      ),
+      PrayerSection(
+        titleAmharic: 'ቅዱስ ቅዱስ ቅዱስ (የመላእክት ምስጋና)',
+        titleGeez: 'ቅዱስ ቅዱስ ቅዱስ',
+        geezText: 'ቅዱስ ቅዱስ ቅዱስ እግዚአብሔር ጸባኦት ፍጹም ምሉዕ ሰማያተ ወምድረ ቅድሳተ ስብሐቲከ።\nንሰግድ ለከ ክርስቶስ ምስለ አቡከ ኄር ሰማያዊ ወመንፈስከ ቅዱስ ማሕየዊ እስመ መጻእከ ወአድኃንከነ።',
+        amharicText: 'የሠራዊት ጌታ እግዚአብሔር ቅዱስ ቅዱስ ቅዱስ ተብሎ ይመሰገናል። የምስጋናህ ቅድስና በሰማይና በምድር የመላ ነው።\nክርስቶስ ሆይ ከቸር ከሰማያዊ አባትህ ጋር ሕይወትን ከሚሰጥ ከቅዱስ መንፈስህ ጋር እንሰግድልሃለን፤ መጥተህ አድነኸናልና።',
+      ),
+      PrayerSection(
+        titleAmharic: 'የእመቤታችን ምስጋና (ሰላም ለኪ)',
+        titleGeez: 'ስብሐት ለኪ ኦ እግዝእትነ',
+        geezText: 'ለአብ ወወልድ ወመንፈስ ቅዱስ ስብሐት ወዕዝዝ ይእዜኒ ወዘልፈኒ ወለዓለመ ዓለም አሜን።\nተፈሥሒ ኦ ምልእተ ጸጋ፤ ተፈሥሒ እስመ ረከብኪ ጸጋ፤ ተፈሥሒ እግዚአብሔር ምስሌኪ።\nቡሩክት አንቲ እምአንስት፤ ወቡሩክ ፍሬ ከርሥኪ፤ ሰአሊ ወጸልዪ በኀበ ፍቁር ወልድኪ ከመ ይሥረይ ለነ ኃጣውኢነ።',
+        amharicText: 'ለአብ ለወልድ ለመንፈስ ቅዱስ ምስጋናና ጌትነት ይገባል፤ ዛሬም ዘወትርም ለዘለዓለሙ አሜን።\nጸጋን የተሞላሽ ሆይ ደስ ይበልሽ፤ ጸጋን አግኝተሻልና ደስ ይበልሽ፤ እግዚአብሔር ከአንቺ ጋር ነውና ደስ ይበልሽ።\nከሴቶች ሁሉ ተለይተሽ የተባረክሽ ነሽ፤ የሆድሽም ፍሬ የተባረከ ነው፤ ኃጢአታችንን ይሠረይልን ዘንድ ከፍቅር ልጅሽ ዘንድ ለምኚልን።',
+      ),
+    ],
   ),
   PrayerItem(
     id: 'pr-2',
@@ -7125,9 +7180,12 @@ class _PrayerLibraryScreenState extends State<PrayerLibraryScreen> {
         borderRadius: BorderRadius.circular(16),
         child: InkWell(
           borderRadius: BorderRadius.circular(16),
-          onTap: () => Navigator.push(context, MaterialPageRoute(
-            builder: (_) => PrayerDetailScreen(isDark: widget.isDark, prayer: p, initiallyBookmarked: bookmarked, onToggleBookmark: () => _toggleBookmark(p.id)),
-          )),
+          onTap: () async {
+            await Navigator.push(context, MaterialPageRoute(
+              builder: (_) => PrayerDetailScreen(isDark: widget.isDark, initialId: p.id),
+            ));
+            _loadBookmarks(); // pick up any bookmark change made from the reader
+          },
           child: Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
@@ -7213,41 +7271,99 @@ class _PrayerLibraryScreenState extends State<PrayerLibraryScreen> {
 
 class PrayerDetailScreen extends StatefulWidget {
   final bool isDark;
-  final PrayerItem prayer;
-  final bool initiallyBookmarked;
-  final VoidCallback onToggleBookmark;
-  const PrayerDetailScreen({super.key, required this.isDark, required this.prayer, required this.initiallyBookmarked, required this.onToggleBookmark});
+  final String initialId;
+  const PrayerDetailScreen({super.key, required this.isDark, required this.initialId});
   @override
   State<PrayerDetailScreen> createState() => _PrayerDetailScreenState();
 }
 
 class _PrayerDetailScreenState extends State<PrayerDetailScreen> {
-  late bool _bookmarked = widget.initiallyBookmarked;
+  late PrayerItem _current = orthodoxPrayerSource.firstWhere(
+    (p) => p.id == widget.initialId,
+    orElse: () => orthodoxPrayerSource.first,
+  );
+  Set<String> _bookmarks = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _loadBookmarks();
+  }
+
+  Future<void> _loadBookmarks() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getStringList('prayer_bookmarks');
+    setState(() => _bookmarks = saved != null ? saved.toSet() : {'pr-1', 'pr-3'});
+  }
+
+  Future<void> _toggleBookmark() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      if (_bookmarks.contains(_current.id)) {
+        _bookmarks.remove(_current.id);
+      } else {
+        _bookmarks.add(_current.id);
+      }
+    });
+    await prefs.setStringList('prayer_bookmarks', _bookmarks.toList());
+  }
 
   @override
   Widget build(BuildContext context) {
     final c = AppColors(widget.isDark);
-    final p = widget.prayer;
+    final p = _current;
+    final bookmarked = _bookmarks.contains(p.id);
     return Scaffold(
       backgroundColor: c.bg,
       body: SafeArea(child: Column(children: [
         Container(
-          color: c.hero, padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-          child: Row(children: [
-            GestureDetector(onTap: () => Navigator.pop(context), child: Icon(Icons.arrow_back_ios, color: c.gold, size: 20)),
-            const SizedBox(width: 10),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(p.titleAmharic, style: TextStyle(fontSize: 15, color: c.text, fontWeight: FontWeight.w800), maxLines: 1, overflow: TextOverflow.ellipsis),
-              Text(p.category, style: TextStyle(fontSize: 11, color: c.muted)),
-            ])),
-            GestureDetector(
-              onTap: () { widget.onToggleBookmark(); setState(() => _bookmarked = !_bookmarked); },
-              child: Icon(_bookmarked ? Icons.bookmark : Icons.bookmark_border, color: c.gold, size: 22),
+          color: c.hero, padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              GestureDetector(onTap: () => Navigator.pop(context), child: Icon(Icons.arrow_back_ios, color: c.gold, size: 20)),
+              const SizedBox(width: 10),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(p.titleAmharic, style: TextStyle(fontSize: 15, color: c.text, fontWeight: FontWeight.w800), maxLines: 1, overflow: TextOverflow.ellipsis),
+                Text(p.category, style: TextStyle(fontSize: 11, color: c.muted)),
+              ])),
+              GestureDetector(
+                onTap: _toggleBookmark,
+                child: Icon(bookmarked ? Icons.bookmark : Icons.bookmark_border, color: c.gold, size: 22),
+              ),
+            ]),
+            const SizedBox(height: 12),
+            // Quick-switch to another prayer without leaving the reader
+            SizedBox(
+              height: 32,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: orthodoxPrayerSource.length,
+                separatorBuilder: (_, _) => const SizedBox(width: 8),
+                itemBuilder: (_, i) {
+                  final other = orthodoxPrayerSource[i];
+                  final active = other.id == p.id;
+                  return GestureDetector(
+                    onTap: () => setState(() => _current = other),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: active ? c.gold : c.card,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: active ? c.gold : c.border, width: 0.5),
+                      ),
+                      child: Text(other.titleAmharic, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
+                        color: active ? (widget.isDark ? const Color(0xFF0F0505) : Colors.white) : c.muted)),
+                    ),
+                  );
+                },
+              ),
             ),
           ]),
         ),
         Divider(color: c.border, height: 0.5),
         Expanded(child: SingleChildScrollView(
+          key: ValueKey(p.id),
           padding: const EdgeInsets.all(18),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(p.titleGeez, style: TextStyle(fontSize: 18, color: c.gold, fontWeight: FontWeight.w800, height: 1.5)),
@@ -7258,25 +7374,50 @@ class _PrayerDetailScreenState extends State<PrayerDetailScreen> {
               Text(p.timeOfDay, style: TextStyle(fontSize: 12, color: c.muted)),
             ]),
             const SizedBox(height: 20),
-            Text('ግዕዝ (Ge\'ez)', style: TextStyle(fontSize: 11, color: c.gold, letterSpacing: 1, fontWeight: FontWeight.w700)),
-            const SizedBox(height: 8),
-            Container(
-              width: double.infinity, padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(color: c.card, borderRadius: BorderRadius.circular(14), border: Border.all(color: c.border, width: 0.5)),
-              child: Text(p.geezText, style: TextStyle(fontSize: 15, color: c.text, height: 1.9)),
-            ),
-            const SizedBox(height: 20),
-            Text('አማርኛ (Amharic)', style: TextStyle(fontSize: 11, color: c.gold, letterSpacing: 1, fontWeight: FontWeight.w700)),
-            const SizedBox(height: 8),
-            Container(
-              width: double.infinity, padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(color: c.goldBg, borderRadius: BorderRadius.circular(14), border: Border.all(color: c.gold.withAlpha(70), width: 0.5)),
-              child: Text(p.amharicTranslation, style: TextStyle(fontSize: 14, color: c.text, height: 1.9)),
-            ),
+            if (p.sections.isNotEmpty)
+              ...p.sections.map((s) => _sectionBlock(s, c))
+            else ...[
+              Text('ግዕዝ (Ge\'ez)', style: TextStyle(fontSize: 11, color: c.gold, letterSpacing: 1, fontWeight: FontWeight.w700)),
+              const SizedBox(height: 8),
+              Container(
+                width: double.infinity, padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(color: c.card, borderRadius: BorderRadius.circular(14), border: Border.all(color: c.border, width: 0.5)),
+                child: Text(p.geezText, style: TextStyle(fontSize: 15, color: c.text, height: 1.9)),
+              ),
+              const SizedBox(height: 20),
+              Text('አማርኛ (Amharic)', style: TextStyle(fontSize: 11, color: c.gold, letterSpacing: 1, fontWeight: FontWeight.w700)),
+              const SizedBox(height: 8),
+              Container(
+                width: double.infinity, padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(color: c.goldBg, borderRadius: BorderRadius.circular(14), border: Border.all(color: c.gold.withAlpha(70), width: 0.5)),
+                child: Text(p.amharicTranslation, style: TextStyle(fontSize: 14, color: c.text, height: 1.9)),
+              ),
+            ],
             const SizedBox(height: 30),
           ]),
         )),
       ])),
     );
   }
+
+  Widget _sectionBlock(PrayerSection s, AppColors c) => Container(
+    margin: const EdgeInsets.only(bottom: 18),
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(color: c.card, borderRadius: BorderRadius.circular(14), border: Border.all(color: c.border, width: 0.5)),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [
+        Container(width: 3, height: 14, color: c.gold, margin: const EdgeInsets.only(right: 8)),
+        Expanded(child: Text('${s.titleAmharic} (${s.titleGeez})',
+          style: TextStyle(fontSize: 12, color: c.gold, fontWeight: FontWeight.w700))),
+      ]),
+      const SizedBox(height: 10),
+      Container(
+        width: double.infinity, padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(color: c.goldBg.withAlpha(120), borderRadius: BorderRadius.circular(12)),
+        child: Text(s.geezText, style: TextStyle(fontSize: 14.5, color: c.text, height: 1.85)),
+      ),
+      const SizedBox(height: 10),
+      Text(s.amharicText, style: TextStyle(fontSize: 13.5, color: c.text, height: 1.8)),
+    ]),
+  );
 }
