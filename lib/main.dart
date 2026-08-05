@@ -1,17 +1,63 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'firebase_options.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tzdata;
 
-const String GOOGLE_API_KEY = 'AIzaSyA-X9y5ouviMuzRZ0xGIrKpst5m0XpF2F8';
+const String googleApiKey = 'AIzaSyA-X9y5ouviMuzRZ0xGIrKpst5m0XpF2F8';
+
+// ── EmailJS (free) — for sending real verification codes by email ──
+// Create a free account at https://www.emailjs.com then fill these in:
+const String emailjsServiceId = 'service_b0dal6k';
+const String emailjsTemplateId = 'template_2wygczm';
+const String emailjsPublicKey = 'f3q9dbEr5J5aicm4M';
+
+Future<bool> sendEmailCode(String toEmail, String code, String purpose) async {
+  if (emailjsServiceId.isEmpty || emailjsTemplateId.isEmpty || emailjsPublicKey.isEmpty) {
+    return false; // not configured yet → caller falls back to on-screen code
+  }
+  try {
+    final client = HttpClient();
+    client.connectionTimeout = const Duration(seconds: 15);
+    final req = await client.postUrl(Uri.parse('https://api.emailjs.com/api/v1.0/email/send'));
+    req.headers.contentType = ContentType.json;
+    req.write(jsonEncode({
+      'service_id': emailjsServiceId,
+      'template_id': emailjsTemplateId,
+      'user_id': emailjsPublicKey,
+      'template_params': {
+        'to_email': toEmail,
+        'code': code,
+        'purpose': purpose,
+      },
+    }));
+    final resp = await req.close();
+    final respBody = await resp.transform(const Utf8Decoder()).join();
+    client.close();
+    debugPrint('EMAILJS status: ${resp.statusCode} body: $respBody');
+    lastEmailError = resp.statusCode == 200 ? '' : ('EmailJS ${resp.statusCode}: $respBody');
+    return resp.statusCode == 200;
+  } catch (e) {
+    debugPrint('EMAILJS exception: $e');
+    lastEmailError = 'Network error: $e';
+    return false;
+  }
+}
+
+String lastEmailError = '';
 
 
 // ═══════════════════════════════════════════════
@@ -312,6 +358,11 @@ class AppColors {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  try {
+    await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  } catch (e) {
+    debugPrint('Firebase init error: $e');
+  }
   await initNotifications();
   runApp(const YenefsAbatApp());
 }
@@ -327,6 +378,7 @@ class _YenefsAbatAppState extends State<YenefsAbatApp> {
   bool _profileLoaded = false;
   UserProfile? _profile;
   bool _needsLogin = false;
+  bool _showOnboarding = false;
 
   @override
   void initState() {
@@ -336,23 +388,53 @@ class _YenefsAbatAppState extends State<YenefsAbatApp> {
 
   Future<void> _loadProfile() async {
     final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString('user_profile');
-    final loggedIn = prefs.getBool('logged_in') ?? false;
     fontSizeNotifier.value = prefs.getDouble('font_size') ?? 1.0;
-    setState(() {
-      _profileLoaded = true;
-      if (raw != null) {
-        _profile = UserProfile.fromJson(jsonDecode(raw));
-        _needsLogin = !loggedIn;
+    final onboarded = prefs.getBool('onboarding_done') ?? false;
+    _showOnboarding = !onboarded;
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        // Reload to get latest emailVerified status
+        await user.reload();
+        final fresh = FirebaseAuth.instance.currentUser;
+        if (fresh != null && !fresh.emailVerified) {
+          // Not verified → do not grant access
+          setState(() { _profileLoaded = true; _needsLogin = true; _profile = null; });
+          return;
+        }
+        final doc = await FirebaseFirestore.instance.collection('users').doc(fresh!.uid).get();
+        if (doc.exists) {
+          final data = doc.data()!;
+          setState(() {
+            _profile = UserProfile(
+              name: data['name'] ?? '',
+              contact: fresh.email ?? data['contact'] ?? '',
+              age: data['age'] ?? 0,
+              gender: data['gender'] ?? '',
+              role: data['role'] ?? '',
+              password: '',
+              verified: fresh.emailVerified,
+            );
+            _needsLogin = false;
+            _profileLoaded = true;
+          });
+          return;
+        }
       }
-    });
+    } catch (e) {
+      debugPrint('loadProfile error: $e');
+    }
+    setState(() { _profileLoaded = true; _needsLogin = false; _profile = null; });
   }
 
   void _onProfileSaved(UserProfile p) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('user_profile', jsonEncode(p.toJson()));
-    await prefs.setBool('logged_in', true);
     setState(() { _profile = p; _needsLogin = false; });
+  }
+
+  Future<void> _finishOnboarding() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('onboarding_done', true);
+    setState(() => _showOnboarding = false);
   }
 
   void _toggleTheme() => setState(() => _isDark = !_isDark);
@@ -375,9 +457,11 @@ class _YenefsAbatAppState extends State<YenefsAbatApp> {
       themeMode: _isDark ? ThemeMode.dark : ThemeMode.light,
       home: !_profileLoaded
           ? const Scaffold(body: Center(child: CircularProgressIndicator()))
-          : _profile == null || _needsLogin
-              ? SignInScreen(onSaved: _onProfileSaved, isDark: _isDark)
-              : MainScreen(isDark: _isDark, onToggleTheme: _toggleTheme, profile: _profile!),
+          : _showOnboarding
+              ? OnboardingScreen(isDark: _isDark, onFinish: _finishOnboarding)
+              : _profile == null || _needsLogin
+                  ? SignInScreen(onSaved: _onProfileSaved, isDark: _isDark)
+                  : MainScreen(isDark: _isDark, onToggleTheme: _toggleTheme, profile: _profile!),
       builder: (context, child) => ValueListenableBuilder<double>(
         valueListenable: fontSizeNotifier,
         builder: (context, scale, _) => MediaQuery(
@@ -422,10 +506,10 @@ class _SignInScreenState extends State<SignInScreen> {
   final _confirmPassCtrl = TextEditingController();
   bool _passVisible = false;
   bool _confirmPassVisible = false;
+  final _forgotContactCtrl = TextEditingController();
 
   // Verification
   final _verifyCtrl = TextEditingController();
-  String _verifyCode = '';
   UserProfile? _pendingProfile;
 
   final List<Map<String, String>> _roles = [
@@ -446,11 +530,6 @@ class _SignInScreenState extends State<SignInScreen> {
     super.dispose();
   }
 
-  String _generateCode() {
-    final code = (100000 + (DateTime.now().millisecondsSinceEpoch % 900000)).toString();
-    return code.substring(0, 6);
-  }
-
   void _showError(String msg) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(msg), backgroundColor: Colors.red.shade800,
@@ -458,42 +537,66 @@ class _SignInScreenState extends State<SignInScreen> {
     ));
   }
 
-  Future<void> _tryLogin() async {
-    print('TRYLOGIN CALLED');
-    final contact = _loginContactCtrl.text.trim();
-    final pass = _loginPassCtrl.text.trim();
-    print('contact=$contact pass=$pass');
+  bool _loading = false;
 
-    if (contact.isEmpty) { _showError('Please enter your phone number or email'); return; }
+  Future<void> _tryLogin() async {
+    final email = _loginContactCtrl.text.trim();
+    final pass = _loginPassCtrl.text.trim();
+
+    if (email.isEmpty) { _showError('Please enter your email'); return; }
+    if (!email.contains('@')) { _showError('Please sign in with your email address'); return; }
     if (pass.isEmpty) { _showError('Please enter your password'); return; }
 
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString('user_profile');
-    if (raw == null) { _showError('No account found. Please register first.'); return; }
-
-    final profile = UserProfile.fromJson(jsonDecode(raw));
-
-    // Check contact match (case insensitive)
-    final contactMatch = profile.contact.trim().toLowerCase() == contact.toLowerCase();
-
-    if (!contactMatch) {
-      _showError('No account found with that phone/email. You registered with: ${profile.contact}');
-      return;
-    }
-
-    // If old account with no password, let them in
-    if (profile.password.isEmpty) {
-      await prefs.setBool('logged_in', true);
+    setState(() => _loading = true);
+    try {
+      final cred = await FirebaseAuth.instance.signInWithEmailAndPassword(email: email, password: pass);
+      final user = cred.user!;
+      final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+      final data = doc.data() ?? {};
+      if (!user.emailVerified) {
+        // Block access until verified — resend link and route to verify screen
+        await user.sendEmailVerification();
+        _pendingProfile = UserProfile(
+          name: data['name'] ?? '', contact: user.email ?? email,
+          age: data['age'] ?? 0, gender: data['gender'] ?? '',
+          role: data['role'] ?? '', password: '', verified: false,
+        );
+        _contactCtrl.text = user.email ?? email;
+        if (!mounted) return;
+        setState(() { _loading = false; _step = 2; });
+        _showError('Please verify your email first. We sent you a new link.');
+        return;
+      }
+      final profile = UserProfile(
+        name: data['name'] ?? '',
+        contact: user.email ?? email,
+        age: data['age'] ?? 0,
+        gender: data['gender'] ?? '',
+        role: data['role'] ?? '',
+        password: '',
+        verified: true,
+      );
+      if (!mounted) return;
+      setState(() => _loading = false);
       widget.onSaved(profile);
-      return;
+    } on FirebaseAuthException catch (e) {
+      setState(() => _loading = false);
+      String msg;
+      switch (e.code) {
+        case 'user-not-found': msg = 'No account found with that email. Please register first.'; break;
+        case 'wrong-password':
+        case 'invalid-credential': msg = 'Incorrect email or password. Tap "Forgot password?" to reset.'; break;
+        case 'invalid-email': msg = 'That email address is not valid.'; break;
+        case 'user-disabled': msg = 'This account has been disabled.'; break;
+        case 'too-many-requests': msg = 'Too many attempts. Please wait a moment and try again.'; break;
+        case 'network-request-failed': msg = 'No internet connection. Please check your network.'; break;
+        default: msg = 'Sign in failed: ${e.message ?? e.code}';
+      }
+      _showError(msg);
+    } catch (e) {
+      setState(() => _loading = false);
+      _showError('Something went wrong. Please try again.');
     }
-
-    if (profile.password != pass) {
-      _showError('Incorrect password. Please try again.'); return;
-    }
-
-    await prefs.setBool('logged_in', true);
-    widget.onSaved(profile);
   }
 
   void _goToRegister() {
@@ -514,7 +617,7 @@ class _SignInScreenState extends State<SignInScreen> {
     return _isValidEmail(contact) || _isValidPhone(contact);
   }
 
-  void _submitRegister() {
+  Future<void> _submitRegister() async {
     final name = _nameCtrl.text.trim();
     final contact = _contactCtrl.text.trim();
     final age = _ageCtrl.text.trim();
@@ -545,70 +648,86 @@ class _SignInScreenState extends State<SignInScreen> {
     if (confirm.isEmpty) { _showError('Please confirm your password'); return; }
     if (pass != confirm) { _showError('Passwords do not match. Please re-enter'); return; }
 
-    final code = _generateCode();
-    _verifyCode = code;
-    _pendingProfile = UserProfile(
-      name: _nameCtrl.text.trim(),
-      contact: _contactCtrl.text.trim(),
-      age: int.tryParse(_ageCtrl.text.trim()) ?? 0,
-      gender: _gender,
-      role: _role,
-      password: _passCtrl.text.trim(),
-      verified: false,
-    );
-
-    // Show verification code dialog (simulating SMS/email)
-    final c = AppColors(widget.isDark);
-    showDialog(context: context, builder: (ctx) => AlertDialog(
-      backgroundColor: c.card,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      title: Text('Verification Code Sent', style: TextStyle(color: c.gold, fontWeight: FontWeight.w800)),
-      content: Column(mainAxisSize: MainAxisSize.min, children: [
-        Text('Your verification code has been sent to:', style: TextStyle(color: c.muted, fontSize: 13)),
-        const SizedBox(height: 8),
-        Text(_contactCtrl.text.trim(), style: TextStyle(color: c.text, fontWeight: FontWeight.w700, fontSize: 14)),
-        const SizedBox(height: 16),
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(color: c.goldBg, borderRadius: BorderRadius.circular(12), border: Border.all(color: c.gold)),
-          child: Column(children: [
-            Text('Your code is:', style: TextStyle(color: c.muted, fontSize: 12)),
-            const SizedBox(height: 6),
-            Text(code, style: TextStyle(color: c.gold, fontSize: 32, fontWeight: FontWeight.w900, letterSpacing: 8)),
-          ]),
-        ),
-        const SizedBox(height: 10),
-        Text('(In a real app this would be sent via SMS or Email)', style: TextStyle(color: c.muted, fontSize: 11, fontStyle: FontStyle.italic)),
-      ]),
-      actions: [
-        GestureDetector(
-          onTap: () { Navigator.pop(ctx); setState(() => _step = 2); },
-          child: Container(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), decoration: BoxDecoration(color: c.gold, borderRadius: BorderRadius.circular(8)),
-            child: Text('Continue', style: TextStyle(color: widget.isDark ? const Color(0xFF0F0505) : Colors.white, fontWeight: FontWeight.w700))),
-        ),
-      ],
-    ));
-  }
-
-  void _submitVerify() {
-    if (_pendingProfile == null) {
-      _showError('Something went wrong. Please go back and register again.');
+    if (!contact.contains('@')) {
+      _showError('Please register with an email address so we can secure and recover your account.');
       return;
     }
-    final entered = _verifyCtrl.text.trim();
-    if (entered.isEmpty) { _showError('Please enter the verification code'); return; }
-    if (entered.length != 6) { _showError('Verification code must be 6 digits'); return; }
-    if (!RegExp(r'^[0-9]{6}$').hasMatch(entered)) { _showError('Verification code must contain numbers only'); return; }
-    if (entered != _verifyCode) {
-      _showError('Incorrect verification code. Please try again.'); return;
+
+    setState(() => _loading = true);
+    try {
+      final cred = await FirebaseAuth.instance.createUserWithEmailAndPassword(email: contact, password: pass);
+      final user = cred.user!;
+      // Save profile in Firestore
+      await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+        'name': name,
+        'contact': contact,
+        'age': int.tryParse(age) ?? 0,
+        'gender': _gender,
+        'role': _role,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+      // Send Firebase's official verification LINK (from Google servers — less Spam)
+      await user.sendEmailVerification();
+      _pendingProfile = UserProfile(
+        name: name, contact: contact, age: int.tryParse(age) ?? 0,
+        gender: _gender, role: _role, password: '', verified: false,
+      );
+      if (!mounted) return;
+      setState(() { _loading = false; _step = 2; });
+    } on FirebaseAuthException catch (e) {
+      setState(() => _loading = false);
+      String msg;
+      switch (e.code) {
+        case 'email-already-in-use': msg = 'An account with this email already exists. Please sign in or reset your password.'; break;
+        case 'invalid-email': msg = 'That email address is not valid.'; break;
+        case 'weak-password': msg = 'Password is too weak. Use at least 6 characters.'; break;
+        case 'network-request-failed': msg = 'No internet connection. Please check your network.'; break;
+        default: msg = 'Registration failed: ${e.message ?? e.code}';
+      }
+      _showError(msg);
+    } catch (e) {
+      setState(() => _loading = false);
+      _showError('Something went wrong. Please try again.');
     }
-    final verified = UserProfile(
-      name: _pendingProfile!.name, contact: _pendingProfile!.contact,
-      age: _pendingProfile!.age, gender: _pendingProfile!.gender,
-      role: _pendingProfile!.role, password: _pendingProfile!.password,
-      verified: true,
-    );
-    widget.onSaved(verified);
+  }
+
+  Future<void> _submitVerify() async {
+    // Firebase-link flow: reload user, check emailVerified
+    setState(() => _loading = true);
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      await user?.reload();
+      final fresh = FirebaseAuth.instance.currentUser;
+      if (!mounted) return;
+      setState(() => _loading = false);
+      if (fresh != null && fresh.emailVerified) {
+        final p = _pendingProfile ?? UserProfile(
+          name: '', contact: fresh.email ?? '', age: 0, gender: '', role: '', password: '', verified: true);
+        widget.onSaved(UserProfile(
+          name: p.name, contact: p.contact, age: p.age,
+          gender: p.gender, role: p.role, password: '', verified: true));
+      } else {
+        _showError('Not verified yet. Open the link in your email (check Spam), then tap this again.');
+      }
+    } catch (_) {
+      setState(() => _loading = false);
+      _showError('Something went wrong. Please try again.');
+    }
+  }
+
+  Future<void> _resendCode() async {
+    setState(() => _loading = true);
+    try {
+      await FirebaseAuth.instance.currentUser?.sendEmailVerification();
+      if (!mounted) return;
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Verification email sent again. Check your inbox and Spam.'),
+        duration: Duration(seconds: 4)));
+    } catch (_) {
+      setState(() => _loading = false);
+      _showError('Could not resend. Please wait a moment and try again.');
+    }
   }
 
   @override
@@ -637,10 +756,56 @@ class _SignInScreenState extends State<SignInScreen> {
             if (_step == 0) _buildLogin(c),
             if (_step == 1) _buildRegister(c),
             if (_step == 2) _buildVerify(c),
+            if (_step == 3) _buildForgot(c),
           ]),
         ),
       ),
     );
+  }
+
+  Future<void> _submitForgotContact() async {
+    final contact = _forgotContactCtrl.text.trim();
+    if (contact.isEmpty) { _showError('Please enter your email'); return; }
+    if (!contact.contains('@')) { _showError('Enter the email you registered with.'); return; }
+    setState(() => _loading = true);
+    try {
+      await FirebaseAuth.instance.sendPasswordResetEmail(email: contact);
+      if (!mounted) return;
+      setState(() => _loading = false);
+      showDialog(context: context, builder: (ctx) {
+        final cc = AppColors(widget.isDark);
+        return AlertDialog(
+          backgroundColor: cc.card,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text('Check Your Email 📬', style: TextStyle(color: cc.gold, fontWeight: FontWeight.w800)),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text('We sent a password reset link to:', style: TextStyle(color: cc.muted, fontSize: 13), textAlign: TextAlign.center),
+            const SizedBox(height: 6),
+            Text(contact, style: TextStyle(color: cc.text, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 10),
+            Text('Open the link in your email to set a new password, then come back and sign in. Check Spam too.', style: TextStyle(color: cc.muted, fontSize: 11, fontStyle: FontStyle.italic), textAlign: TextAlign.center),
+          ]),
+          actions: [
+            GestureDetector(
+              onTap: () { Navigator.pop(ctx); setState(() => _step = 0); _loginContactCtrl.text = contact; },
+              child: Container(padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
+                decoration: BoxDecoration(color: cc.gold, borderRadius: BorderRadius.circular(10)),
+                child: Text('Back to Sign In', style: TextStyle(color: widget.isDark ? const Color(0xFF0F0505) : Colors.white, fontWeight: FontWeight.w700))),
+            ),
+          ],
+        );
+      });
+    } on FirebaseAuthException catch (e) {
+      setState(() => _loading = false);
+      if (e.code == 'user-not-found') {
+        _showError('No account found with that email.');
+      } else {
+        _showError('Could not send reset email: ${e.message ?? e.code}');
+      }
+    } catch (e) {
+      setState(() => _loading = false);
+      _showError('Something went wrong. Please try again.');
+    }
   }
 
   Widget _buildLogin(AppColors c) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -656,8 +821,13 @@ class _SignInScreenState extends State<SignInScreen> {
     const SizedBox(height: 8),
     _passwordField('Enter your password', _loginPassCtrl, _loginPassVisible, (v) => setState(() => _loginPassVisible = v), c),
     const SizedBox(height: 28),
-    _goldBtn('SIGN IN', () => _tryLogin(), c),
-    const SizedBox(height: 16),
+    _goldBtn('SIGN IN', () => _tryLogin(), c, loading: _loading),
+    const SizedBox(height: 12),
+    Center(child: GestureDetector(
+      onTap: () { _forgotContactCtrl.text = _loginContactCtrl.text; setState(() => _step = 3); },
+      child: Text('Forgot password?', style: TextStyle(color: c.gold, fontSize: 13, fontWeight: FontWeight.w700)),
+    )),
+    const SizedBox(height: 12),
     Row(mainAxisAlignment: MainAxisAlignment.center, children: [
       Text("Don't have an account? ", style: TextStyle(color: c.muted, fontSize: 13)),
       GestureDetector(onTap: _goToRegister, child: Text('Register', style: TextStyle(color: c.gold, fontSize: 13, fontWeight: FontWeight.w700))),
@@ -715,7 +885,7 @@ class _SignInScreenState extends State<SignInScreen> {
     _label('Confirm Password *', 'ይለፍ ቃል አረጋግጥ', c), const SizedBox(height: 8),
     _passwordField('Re-enter your password', _confirmPassCtrl, _confirmPassVisible, (v) => setState(() => _confirmPassVisible = v), c),
     const SizedBox(height: 28),
-    _goldBtn('REGISTER & VERIFY', _submitRegister, c),
+    _goldBtn('REGISTER & VERIFY', _submitRegister, c, loading: _loading),
     const SizedBox(height: 16),
     Row(mainAxisAlignment: MainAxisAlignment.center, children: [
       Text('Already have an account? ', style: TextStyle(color: c.muted, fontSize: 13)),
@@ -726,41 +896,66 @@ class _SignInScreenState extends State<SignInScreen> {
 
   Widget _buildVerify(AppColors c) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
     Center(child: Column(children: [
-      Container(width: 70, height: 70, decoration: BoxDecoration(color: c.goldBg, shape: BoxShape.circle, border: Border.all(color: c.gold, width: 2)),
-        child: Center(child: Icon(Icons.verified_user_outlined, color: c.gold, size: 36))),
+      Container(width: 74, height: 74, decoration: BoxDecoration(color: c.goldBg, shape: BoxShape.circle, border: Border.all(color: c.gold, width: 2)),
+        child: Center(child: Icon(Icons.mark_email_read_outlined, color: c.gold, size: 38))),
       const SizedBox(height: 16),
-      Text('Verify Your Account', style: TextStyle(fontSize: 20, color: c.text, fontWeight: FontWeight.w800)),
+      Text('Verify Your Email', style: TextStyle(fontSize: 20, color: c.text, fontWeight: FontWeight.w800)),
       const SizedBox(height: 6),
-      Text('Enter the 6-digit code sent to', style: TextStyle(fontSize: 13, color: c.muted)),
+      Text('We sent a verification link to', style: TextStyle(fontSize: 13, color: c.muted)),
       const SizedBox(height: 4),
-      Text(_contactCtrl.text.trim(), style: TextStyle(fontSize: 13, color: c.gold, fontWeight: FontWeight.w700)),
+      Text(_contactCtrl.text.trim(), style: TextStyle(fontSize: 14, color: c.gold, fontWeight: FontWeight.w700)),
     ])),
-    const SizedBox(height: 28),
-    Center(child: Text('VERIFICATION CODE', style: TextStyle(fontSize: 10, color: c.label, letterSpacing: 3, fontWeight: FontWeight.w700))),
-    const SizedBox(height: 12),
-    TextField(
-      controller: _verifyCtrl,
-      keyboardType: TextInputType.number,
-      textAlign: TextAlign.center,
-      maxLength: 6,
-      style: TextStyle(fontSize: 32, color: c.gold, fontWeight: FontWeight.w900, letterSpacing: 12),
-      decoration: InputDecoration(
-        counterText: '',
-        hintText: '000000', hintStyle: TextStyle(color: c.muted, fontSize: 28, letterSpacing: 8),
-        filled: true, fillColor: c.card,
-        contentPadding: const EdgeInsets.symmetric(vertical: 20),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: c.border)),
-        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: c.border)),
-        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: c.gold, width: 2)),
-      ),
+    const SizedBox(height: 24),
+    Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(color: c.card, borderRadius: BorderRadius.circular(14), border: Border.all(color: c.border)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        _stepRow('1', 'Open your email inbox', c),
+        const SizedBox(height: 10),
+        _stepRow('2', 'Tap the verification link from Yenefs Abat', c),
+        const SizedBox(height: 10),
+        _stepRow('3', 'Come back here and tap the button below', c),
+        const SizedBox(height: 8),
+        Text('Tip: check your Spam folder too, and mark it "Not Spam".',
+          style: TextStyle(fontSize: 11, color: c.muted, fontStyle: FontStyle.italic)),
+      ]),
     ),
-    const SizedBox(height: 28),
-    _goldBtn('VERIFY & CONTINUE', _submitVerify, c),
-    const SizedBox(height: 16),
+    const SizedBox(height: 24),
+    _goldBtn("I'VE VERIFIED — CONTINUE", _submitVerify, c, loading: _loading),
+    const SizedBox(height: 14),
     Center(child: GestureDetector(
-      onTap: () => setState(() => _step = 1),
-      child: Text('Go back and edit', style: TextStyle(color: c.muted, fontSize: 13)),
+      onTap: _resendCode,
+      child: Text('Didn\'t get it? Resend email', style: TextStyle(color: c.gold, fontSize: 13, fontWeight: FontWeight.w700)),
     )),
+    const SizedBox(height: 10),
+    Center(child: GestureDetector(
+      onTap: () => setState(() => _step = 0),
+      child: Text('Back to Sign In', style: TextStyle(color: c.muted, fontSize: 13)),
+    )),
+    const SizedBox(height: 24),
+  ]);
+
+  Widget _stepRow(String n, String text, AppColors c) => Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    Container(width: 22, height: 22, decoration: BoxDecoration(color: c.gold, shape: BoxShape.circle),
+      child: Center(child: Text(n, style: TextStyle(color: widget.isDark ? const Color(0xFF0F0505) : Colors.white, fontSize: 12, fontWeight: FontWeight.w800)))),
+    const SizedBox(width: 10),
+    Expanded(child: Text(text, style: TextStyle(fontSize: 13, color: c.text, height: 1.4))),
+  ]);
+
+  Widget _buildForgot(AppColors c) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    Row(children: [
+      GestureDetector(onTap: () => setState(() => _step = 0), child: Icon(Icons.arrow_back_ios, color: c.gold, size: 20)),
+      const SizedBox(width: 8),
+      Text('Forgot Password', style: TextStyle(fontSize: 20, color: c.text, fontWeight: FontWeight.w800)),
+    ]),
+    const SizedBox(height: 4),
+    Text('የይለፍ ቃል ረሱ? — Enter your registered phone or email and we will send you a recovery code.', style: TextStyle(fontSize: 13, color: c.muted, height: 1.5)),
+    const SizedBox(height: 20),
+    _label('Phone or Email', 'ስልክ ወይም ኢሜል', c),
+    const SizedBox(height: 8),
+    _inputField('Enter your registered phone or email', _forgotContactCtrl, c),
+    const SizedBox(height: 28),
+    _goldBtn('SEND RECOVERY CODE', () => _submitForgotContact(), c, loading: _loading),
     const SizedBox(height: 24),
   ]);
 
@@ -800,12 +995,16 @@ class _SignInScreenState extends State<SignInScreen> {
     ),
   );
 
-  Widget _goldBtn(String label, VoidCallback onTap, AppColors c) => GestureDetector(
-    onTap: onTap,
+  Widget _goldBtn(String label, VoidCallback onTap, AppColors c, {bool loading = false}) => GestureDetector(
+    onTap: loading ? null : onTap,
     child: Container(
       width: double.infinity, padding: const EdgeInsets.symmetric(vertical: 16),
-      decoration: BoxDecoration(color: c.gold, borderRadius: BorderRadius.circular(14), boxShadow: [BoxShadow(color: c.gold.withAlpha(80), blurRadius: 16, offset: const Offset(0, 4))]),
-      child: Center(child: Text(label, style: TextStyle(fontSize: 14, letterSpacing: 2, fontWeight: FontWeight.w800, color: widget.isDark ? const Color(0xFF0F0505) : Colors.white))),
+      decoration: BoxDecoration(color: c.gold.withAlpha(loading ? 160 : 255), borderRadius: BorderRadius.circular(14), boxShadow: [BoxShadow(color: c.gold.withAlpha(80), blurRadius: 16, offset: const Offset(0, 4))]),
+      child: Center(
+        child: loading
+          ? SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2.4, color: widget.isDark ? const Color(0xFF0F0505) : Colors.white))
+          : Text(label, style: TextStyle(fontSize: 14, letterSpacing: 2, fontWeight: FontWeight.w800, color: widget.isDark ? const Color(0xFF0F0505) : Colors.white)),
+      ),
     ),
   );
 }
@@ -1381,9 +1580,13 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                   setState(() {
                     if (key == 'prayer_morning') {
                       _morningTime = newTime;
-                    } else if (key == 'prayer_noon') _noonTime = newTime;
-                    else if (key == 'prayer_evening') _eveningTime = newTime;
-                    else _nightTime = newTime;
+                    } else if (key == 'prayer_noon') {
+                      _noonTime = newTime;
+                    } else if (key == 'prayer_evening') {
+                      _eveningTime = newTime;
+                    } else {
+                      _nightTime = newTime;
+                    }
                   });
                   await _savePrayerTime(key, newTime, id, label);
                 }),
@@ -1470,36 +1673,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
   }
 
-  Widget _grid(AppColors c) {
-    final items = [
-      {'icon': '📅', 'title': 'FASTING', 'sub': 'Calendar'},
-      {'icon': '⛪', 'title': 'FIND PRIEST', 'sub': 'Near you'},
-      {'icon': '📜', 'title': 'PENANCE', 'sub': 'Your log'},
-      {'icon': '🙏', 'title': 'SAINTS', 'sub': 'All feasts'},
-    ];
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 0, 14, 0),
-      child: GridView.count(
-        crossAxisCount: 2, shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        crossAxisSpacing: 10, mainAxisSpacing: 10, childAspectRatio: 1.5,
-        children: items.map((item) => Container(
-          decoration: BoxDecoration(
-            color: c.card, borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: c.border, width: 0.5),
-            boxShadow: [BoxShadow(color: Colors.black.withAlpha(10), blurRadius: 8, offset: const Offset(0, 2))],
-          ),
-          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-            Text(item['icon']!, style: const TextStyle(fontSize: 24)),
-            const SizedBox(height: 6),
-            Text(item['title']!, style: TextStyle(fontSize: 10, color: c.text, letterSpacing: 1, fontWeight: FontWeight.w700)),
-            const SizedBox(height: 3),
-            Text(item['sub']!, style: TextStyle(fontSize: 11, color: c.muted, fontStyle: FontStyle.italic)),
-          ]),
-        )).toList(),
-      ),
-    );
-  }
 }
 
 // ═══════════════════════════════════════════════
@@ -1676,23 +1849,44 @@ class _ConfessScreenState extends State<ConfessScreen> with SingleTickerProvider
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Row(children: [
                 Container(width: 4, height: 20, color: c.gold, margin: const EdgeInsets.only(right: 10)),
-                Text('CONFESSION GUIDE', style: TextStyle(fontSize: 16, color: c.text, letterSpacing: 2, fontWeight: FontWeight.w800)),
-                const Spacer(),
-                GestureDetector(
+                Expanded(child: Text('CONFESSION GUIDE', style: TextStyle(fontSize: 16, color: c.text, letterSpacing: 2, fontWeight: FontWeight.w800))),
+              ]),
+              const SizedBox(height: 12),
+              GestureDetector(
+                onTap: () => Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => ConfessionGuideScreen(isDark: widget.isDark))),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(gradient: LinearGradient(colors: [c.gold.withAlpha(70), c.goldBg]), borderRadius: BorderRadius.circular(14), border: Border.all(color: c.gold, width: 1)),
+                  child: Row(children: [
+                    Icon(Icons.menu_book_rounded, color: c.gold, size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text('Why We Confess', style: TextStyle(fontSize: 15, color: c.gold, fontWeight: FontWeight.w900)),
+                      Text('ስለ ንስሐ — Learn the meaning & verses', style: TextStyle(fontSize: 11, color: c.muted)),
+                    ])),
+                    Icon(Icons.chevron_right, color: c.gold, size: 20),
+                  ]),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Row(children: [
+                Expanded(child: GestureDetector(
                   onTap: () => Navigator.push(context, MaterialPageRoute(
                     builder: (_) => ConfessionHistoryScreen(isDark: widget.isDark))),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     decoration: BoxDecoration(color: c.goldBg, borderRadius: BorderRadius.circular(20), border: Border.all(color: c.gold, width: 0.5)),
-                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    child: Row(mainAxisSize: MainAxisSize.min, mainAxisAlignment: MainAxisAlignment.center, children: [
                       Icon(Icons.history, color: c.gold, size: 14),
                       const SizedBox(width: 4),
-                      Text('History', style: TextStyle(fontSize: 11, color: c.gold, fontWeight: FontWeight.w600)),
+                      Text('History', style: TextStyle(fontSize: 12, color: c.gold, fontWeight: FontWeight.w700)),
                     ]),
                   ),
-                ),
-                const SizedBox(width: 8),
-                GestureDetector(
+                )),
+                const SizedBox(width: 10),
+                Expanded(child: GestureDetector(
                   onTap: () => showDialog(context: context, builder: (ctx) => AlertDialog(
                     backgroundColor: c.card,
                     title: Text('Clear All', style: TextStyle(color: c.text)),
@@ -1703,13 +1897,17 @@ class _ConfessScreenState extends State<ConfessScreen> with SingleTickerProvider
                     ],
                   )),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     decoration: BoxDecoration(color: c.strip, borderRadius: BorderRadius.circular(20)),
-                    child: Text('Clear All', style: TextStyle(fontSize: 11, color: c.muted)),
+                    child: Row(mainAxisSize: MainAxisSize.min, mainAxisAlignment: MainAxisAlignment.center, children: [
+                      Icon(Icons.delete_outline, color: c.muted, size: 14),
+                      const SizedBox(width: 4),
+                      Text('Clear All', style: TextStyle(fontSize: 12, color: c.muted, fontWeight: FontWeight.w600)),
+                    ]),
                   ),
-                ),
+                )),
               ]),
-              const SizedBox(height: 8),
+              const SizedBox(height: 10),
               Text('ኑዛዜ ዝርዝር — Review before confessing', style: TextStyle(fontSize: 12, color: c.muted, fontStyle: FontStyle.italic)),
               const SizedBox(height: 10),
               Row(children: [
@@ -4025,12 +4223,6 @@ const List<EotcDay> eotcCalendar = [
   EotcDay(month:13,day:6,name:'የምስጋና ጸሎት ማጠናቀቂያ'),
 ];
 
-class _CalEvent {
-  final int ethDay;
-  final String title;
-  const _CalEvent({required this.ethDay, required this.title});
-}
-
 class CalendarScreen extends StatefulWidget {
   final bool isDark;
   const CalendarScreen({super.key, required this.isDark});
@@ -4052,11 +4244,6 @@ class _CalendarScreenState extends State<CalendarScreen> with SingleTickerProvid
   final _ethYearCtrl = TextEditingController();
   String _convResult = '';
   bool _convToEth = true;
-
-  final List<_CalEvent> _events = const [
-    _CalEvent(ethDay: 9, title: 'የእስላም አዲስ ዓመት'),
-    _CalEvent(ethDay: 18, title: 'አሹራ'),
-  ];
 
   @override
   void initState() {
@@ -4100,7 +4287,6 @@ class _CalendarScreenState extends State<CalendarScreen> with SingleTickerProvid
   }
 
   bool _isToday(int day) => day == _today.day && _viewMonth == _today.month && _viewYear == _today.year;
-  bool _hasEvent(int day) => _events.any((e) => e.ethDay == day);
 
   @override
   Widget build(BuildContext context) {
@@ -4463,6 +4649,335 @@ class _CalendarScreenState extends State<CalendarScreen> with SingleTickerProvid
 // CONFESSION HISTORY SCREEN
 // ═══════════════════════════════════════════════
 
+class OnboardingScreen extends StatefulWidget {
+  final bool isDark;
+  final VoidCallback onFinish;
+  const OnboardingScreen({super.key, required this.isDark, required this.onFinish});
+  @override
+  State<OnboardingScreen> createState() => _OnboardingScreenState();
+}
+
+class _OnboardingScreenState extends State<OnboardingScreen> {
+  final PageController _pc = PageController();
+  int _page = 0;
+
+  static const List<Map<String, String>> _slides = [
+    {
+      'emoji': '☩',
+      'title': 'Yenefs Abat',
+      'titleAm': 'የነፍስ አባት',
+      'body': 'Your spiritual companion in the Ethiopian Orthodox Tewahedo faith — always with you, wherever you are.',
+      'bodyAm': 'የነፍስ አባትዎ — በኪስዎ ውስጥ ያለ መንፈሳዊ አጋር።',
+    },
+    {
+      'emoji': '✝️',
+      'title': 'Stay Faithful to Confession',
+      'titleAm': 'ለንስሐ ታማኝ ይሁኑ',
+      'body': 'Prepare for confession, examine your conscience, and keep track of your spiritual journey so you never drift away.',
+      'bodyAm': 'ለንስሐ ይዘጋጁ፣ ኅሊናዎን ይመርምሩ፣ መንፈሳዊ ጉዞዎን ይከታተሉ።',
+    },
+    {
+      'emoji': '🔔',
+      'title': 'Never Miss Prayer Time',
+      'titleAm': 'የጸሎት ጊዜ አያምልጥዎ',
+      'body': 'Gentle reminders call you to prayer through the day, like the church bell — morning, noon, evening, and night.',
+      'bodyAm': 'እንደ ደወል በቀኑ ውስጥ ወደ ጸሎት ይጠሩዎታል።',
+    },
+    {
+      'emoji': '📅',
+      'title': 'Follow the Orthodox Calendar',
+      'titleAm': 'የኦርቶዶክስ ቀን መቁጠሪያ',
+      'body': 'Know the true date, every fast and feast, and the saint (ስንክሳር) remembered on each day of the year.',
+      'bodyAm': 'ትክክለኛውን ቀን፣ ጾምና በዓል፣ የዕለቱን ስንክሳር ይወቁ።',
+    },
+    {
+      'emoji': '⛪',
+      'title': 'Find the Nearest Church',
+      'titleAm': 'ቅርብ ቤተ ክርስቲያን ያግኙ',
+      'body': 'Discover Ethiopian Orthodox churches near you, and find a place to worship and a spiritual father wherever you go.',
+      'bodyAm': 'በአቅራቢያዎ ያሉ የኦርቶዶክስ አብያተ ክርስቲያናትን ያግኙ።',
+    },
+  ];
+
+  @override
+  void dispose() { _pc.dispose(); super.dispose(); }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppColors(widget.isDark);
+    final isLast = _page == _slides.length - 1;
+    return Scaffold(
+      backgroundColor: c.bg,
+      body: SafeArea(child: Column(children: [
+        // Skip
+        Align(
+          alignment: Alignment.topRight,
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: GestureDetector(
+              onTap: widget.onFinish,
+              child: Text('Skip', style: TextStyle(color: c.muted, fontSize: 14, fontWeight: FontWeight.w600)),
+            ),
+          ),
+        ),
+        Expanded(
+          child: PageView.builder(
+            controller: _pc,
+            itemCount: _slides.length,
+            onPageChanged: (i) => setState(() => _page = i),
+            itemBuilder: (_, i) {
+              final s = _slides[i];
+              return Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 32),
+                child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                  Container(
+                    width: 130, height: 130,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight,
+                        colors: [c.goldBg, c.card]),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: c.gold, width: 2),
+                      boxShadow: [BoxShadow(color: c.gold.withAlpha(80), blurRadius: 30, spreadRadius: 4)],
+                    ),
+                    child: Center(child: Text(s['emoji']!, style: const TextStyle(fontSize: 64))),
+                  ),
+                  const SizedBox(height: 40),
+                  Text(s['titleAm']!, style: TextStyle(fontSize: 18, color: c.gold, fontWeight: FontWeight.w700), textAlign: TextAlign.center),
+                  const SizedBox(height: 6),
+                  Text(s['title']!, style: TextStyle(fontSize: 24, color: c.text, fontWeight: FontWeight.w900, height: 1.2), textAlign: TextAlign.center),
+                  const SizedBox(height: 18),
+                  Text(s['body']!, style: TextStyle(fontSize: 14.5, color: c.muted, height: 1.7), textAlign: TextAlign.center),
+                  const SizedBox(height: 10),
+                  Text(s['bodyAm']!, style: TextStyle(fontSize: 13, color: c.text, height: 1.8), textAlign: TextAlign.center),
+                ]),
+              );
+            },
+          ),
+        ),
+        // Dots
+        Row(mainAxisAlignment: MainAxisAlignment.center, children: List.generate(_slides.length, (i) =>
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 250),
+            margin: const EdgeInsets.symmetric(horizontal: 4),
+            width: i == _page ? 26 : 8, height: 8,
+            decoration: BoxDecoration(
+              color: i == _page ? c.gold : c.muted.withAlpha(80),
+              borderRadius: BorderRadius.circular(4),
+            ),
+          ),
+        )),
+        const SizedBox(height: 28),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: GestureDetector(
+            onTap: () {
+              if (isLast) {
+                widget.onFinish();
+              } else {
+                _pc.nextPage(duration: const Duration(milliseconds: 350), curve: Curves.easeInOut);
+              }
+            },
+            child: Container(
+              width: double.infinity, height: 54,
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(colors: [Color(0xFFE3C878), Color(0xFFC9A84C), Color(0xFFA98937)]),
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [BoxShadow(color: c.gold.withAlpha(110), blurRadius: 16, offset: const Offset(0, 6))],
+              ),
+              child: Center(child: Text(
+                isLast ? 'GET STARTED' : 'NEXT',
+                style: TextStyle(color: widget.isDark ? const Color(0xFF0F0505) : Colors.white, fontWeight: FontWeight.w900, fontSize: 15, letterSpacing: 1),
+              )),
+            ),
+          ),
+        ),
+        const SizedBox(height: 24),
+      ])),
+    );
+  }
+}
+
+
+class ConfessionGuideScreen extends StatelessWidget {
+  final bool isDark;
+  const ConfessionGuideScreen({super.key, required this.isDark});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppColors(isDark);
+    return Scaffold(
+      backgroundColor: c.bg,
+      body: SafeArea(child: Column(children: [
+        Container(
+          color: c.hero, padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+          child: Row(children: [
+            GestureDetector(onTap: () => Navigator.pop(context), child: Icon(Icons.arrow_back_ios, color: c.gold, size: 20)),
+            const SizedBox(width: 10),
+            Container(width: 4, height: 20, color: c.gold, margin: const EdgeInsets.only(right: 10)),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('WHY WE CONFESS', style: TextStyle(fontSize: 15, color: c.text, letterSpacing: 2, fontWeight: FontWeight.w800)),
+              Text('ስለ ንስሐ — The Sacrament of Repentance', style: TextStyle(fontSize: 11, color: c.muted, fontStyle: FontStyle.italic)),
+            ])),
+          ]),
+        ),
+        Divider(color: c.border, height: 0.5),
+        Expanded(child: SingleChildScrollView(
+          padding: const EdgeInsets.all(18),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            _hero(c),
+            const SizedBox(height: 24),
+            _section(c, '☩', 'What is Confession?', 'ኑዛዜ ምንድን ነው?',
+              en: 'Confession (ንስሐ) is one of the seven sacraments of the Ethiopian Orthodox Tewahedo Church. It is the sacred act by which a believer, through a spiritual father, confesses their sins to God, receives forgiveness, and is restored to communion with Him. It is not merely listing wrongs — it is a turning of the whole heart back to God.',
+              am: 'ንስሐ ከኢትዮጵያ ኦርቶዶክስ ተዋሕዶ ቤተ ክርስቲያን ሰባቱ ምሥጢራት አንዱ ነው። ምእመኑ በንስሐ አባቱ በኩል ኃጢአቱን ለእግዚአብሔር የሚናዘዝበት፣ ይቅርታን የሚያገኝበት እና ከእግዚአብሔር ጋር ኅብረቱን የሚያድስበት ቅዱስ ተግባር ነው። ኃጢአትን መዘርዘር ብቻ ሳይሆን፣ ልብን ሙሉ በሙሉ ወደ እግዚአብሔር መመለስ ነው።'),
+            _verse(c, 'If we confess our sins, He is faithful and just to forgive us our sins, and to cleanse us from all unrighteousness.', '1 John 1:9',
+              'ኃጢአታችንን ብንናዘዝ ኃጢአታችንን ይቅር ሊለን ከዓመፃም ሁሉ ሊያነጻን የታመነና ጻድቅ ነው። — ፩ ዮሐንስ ፩፥፱'),
+            _section(c, '🕊️', 'Why Do We Need to Confess?', 'ለምን መናዘዝ ያስፈልገናል?',
+              en: 'Sin separates us from God and wounds the soul. Just as the body needs healing when sick, the soul needs healing when it falls into sin. Confession is the medicine of the soul — it removes the burden of guilt, reconciles us with God and the Church, and gives us strength to resist sin. Christ gave His apostles — and through them, priests — the authority to loose sins.',
+              am: 'ኃጢአት ከእግዚአብሔር ይለየናል ነፍስንም ያቆስላል። ሰውነት ሲታመም ፈውስ እንደሚያስፈልገው፣ ነፍስም ወደ ኃጢአት ስትወድቅ ፈውስ ያስፈልጋታል። ንስሐ የነፍስ መድኃኒት ነው — የበደል ሸክምን ያስወግዳል፣ ከእግዚአብሔርና ከቤተ ክርስቲያን ጋር ያስታርቀናል፣ ኃጢአትን ለመቋቋም ኃይል ይሰጠናል። ክርስቶስ ለሐዋርያቱ — በእነርሱም በኩል ለካህናት — ኃጢአትን የማሰር እና የመፍታት ሥልጣን ሰጠ።'),
+            _verse(c, 'Whose soever sins ye remit, they are remitted unto them; and whose soever sins ye retain, they are retained.', 'John 20:23',
+              'ኃጢአታቸውን ይቅር ያላችኋቸው ሁሉ ይቀርላቸዋል፤ የያዛችሁባቸው ተይዞባቸዋል። — ዮሐንስ ፳፥፳፫'),
+            _section(c, '💧', 'The Fruit of Confession', 'የንስሐ ፍሬ',
+              en: 'True confession brings peace of heart, a clear conscience, and joy. It breaks the chains of habitual sin and renews our baptismal purity. The one who confesses honestly and regularly grows steadily closer to God, and finds their spiritual struggles becoming lighter over time.',
+              am: 'እውነተኛ ንስሐ የልብ ሰላም፣ ንጹህ ኅሊና እና ደስታን ያመጣል። የልማድ ኃጢአት ሰንሰለቶችን ይሰብራል የጥምቀትንም ንጽሕና ያድሳል። በታማኝነትና በተከታታይ የሚናዘዝ ሰው ወደ እግዚአብሔር እየተጠጋ ይሄዳል፣ መንፈሳዊ ትግሉም እየቀለለ ይሄዳል።'),
+            _verse(c, 'Confess your faults one to another, and pray one for another, that ye may be healed.', 'James 5:16',
+              'እርስ በርሳችሁ በኃጢአታችሁ ተናዘዙ ትፈወሱም ዘንድ እርስ በርሳችሁ ጸልዩ። — ያዕቆብ ፭፥፲፮'),
+            const SizedBox(height: 8),
+            _stepsCard(c),
+            const SizedBox(height: 20),
+            _prayerCard(c),
+            const SizedBox(height: 24),
+          ]),
+        )),
+      ])),
+    );
+  }
+
+  Widget _hero(AppColors c) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(22),
+    decoration: BoxDecoration(
+      gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight,
+        colors: [c.goldBg, c.card]),
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: c.gold, width: 1),
+    ),
+    child: Column(children: [
+      Container(width: 64, height: 64,
+        decoration: BoxDecoration(color: c.card, shape: BoxShape.circle, border: Border.all(color: c.gold, width: 2),
+          boxShadow: [BoxShadow(color: c.gold.withAlpha(70), blurRadius: 16, spreadRadius: 1)]),
+        child: Center(child: Text('☩', style: TextStyle(fontSize: 32, color: c.gold)))),
+      const SizedBox(height: 14),
+      Text('"Return to Me, and I will return to you."',
+        style: TextStyle(fontSize: 15, color: c.text, fontWeight: FontWeight.w700, fontStyle: FontStyle.italic, height: 1.5),
+        textAlign: TextAlign.center),
+      const SizedBox(height: 6),
+      Text('ተመለሱ ወደ እኔ እኔም እመለሳለሁ ወደ እናንተ',
+        style: TextStyle(fontSize: 13, color: c.gold, height: 1.6), textAlign: TextAlign.center),
+      const SizedBox(height: 4),
+      Text('Malachi 3:7 — ሚልክያስ ፫፥፯', style: TextStyle(fontSize: 11, color: c.muted)),
+    ]),
+  );
+
+  Widget _section(AppColors c, String emoji, String titleEn, String titleAm, {required String en, required String am}) =>
+    Padding(
+      padding: const EdgeInsets.only(bottom: 22),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Text(emoji, style: const TextStyle(fontSize: 20)),
+          const SizedBox(width: 8),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(titleEn, style: TextStyle(fontSize: 16, color: c.text, fontWeight: FontWeight.w800)),
+            Text(titleAm, style: TextStyle(fontSize: 12, color: c.gold, fontWeight: FontWeight.w600)),
+          ])),
+        ]),
+        const SizedBox(height: 12),
+        Text(am, style: TextStyle(fontSize: 14, color: c.text, height: 1.9)),
+        const SizedBox(height: 12),
+        Text(en, style: TextStyle(fontSize: 13.5, color: c.muted, height: 1.8, fontStyle: FontStyle.italic)),
+      ]),
+    );
+
+  Widget _verse(AppColors c, String en, String ref, String am) => Container(
+    width: double.infinity,
+    margin: const EdgeInsets.only(bottom: 22),
+    padding: const EdgeInsets.all(16),
+    decoration: BoxDecoration(
+      color: c.goldBg,
+      borderRadius: BorderRadius.circular(14),
+      border: Border(left: BorderSide(color: c.gold, width: 3)),
+    ),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text('"$en"', style: TextStyle(fontSize: 13.5, color: c.text, height: 1.7, fontStyle: FontStyle.italic)),
+      const SizedBox(height: 8),
+      Text(am, style: TextStyle(fontSize: 12.5, color: c.text, height: 1.8)),
+      const SizedBox(height: 6),
+      Text('— $ref', style: TextStyle(fontSize: 12, color: c.gold, fontWeight: FontWeight.w700)),
+    ]),
+  );
+
+  Widget _stepsCard(AppColors c) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(18),
+    decoration: BoxDecoration(color: c.card, borderRadius: BorderRadius.circular(16), border: Border.all(color: c.border)),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [
+        Text('📿', style: const TextStyle(fontSize: 18)),
+        const SizedBox(width: 8),
+        Text('How to Prepare for Confession', style: TextStyle(fontSize: 15, color: c.text, fontWeight: FontWeight.w800)),
+      ]),
+      const SizedBox(height: 4),
+      Text('ለንስሐ እንዴት እንዘጋጃለን', style: TextStyle(fontSize: 12, color: c.gold, fontWeight: FontWeight.w600)),
+      const SizedBox(height: 16),
+      _step(c, '1', 'Pray for a contrite heart', 'የተሰበረ ልብ ይኖረኝ ዘንድ ጸልይ', 'Ask the Holy Spirit to reveal your sins and grant you true sorrow for them.'),
+      _step(c, '2', 'Examine your conscience', 'ኅሊናህን መርምር', 'Use the checklist in this app to reflect honestly on your thoughts, words, and deeds since your last confession.'),
+      _step(c, '3', 'Confess honestly & completely', 'በእውነት ተናዘዝ', 'Hide nothing from your spiritual father. He stands in the place of Christ and is bound to secrecy.'),
+      _step(c, '4', 'Receive absolution & penance', 'ፍትሐትና ቀኖና ተቀበል', 'Accept the prayer of forgiveness and perform the penance (ቀኖና) given to you with humility.'),
+      _step(c, '5', 'Amend your life', 'ሕይወትህን አድስ', 'Resolve, with God\'s help, to turn away from sin and walk in righteousness.', last: true),
+    ]),
+  );
+
+  Widget _step(AppColors c, String n, String en, String am, String desc, {bool last = false}) => Padding(
+    padding: EdgeInsets.only(bottom: last ? 0 : 16),
+    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Container(width: 26, height: 26, decoration: BoxDecoration(gradient: LinearGradient(colors: [const Color(0xFFE3C878), c.gold]), shape: BoxShape.circle),
+        child: Center(child: Text(n, style: TextStyle(color: isDark ? const Color(0xFF0F0505) : Colors.white, fontSize: 13, fontWeight: FontWeight.w900)))),
+      const SizedBox(width: 12),
+      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(en, style: TextStyle(fontSize: 13.5, color: c.text, fontWeight: FontWeight.w700)),
+        Text(am, style: TextStyle(fontSize: 12, color: c.gold)),
+        const SizedBox(height: 3),
+        Text(desc, style: TextStyle(fontSize: 12, color: c.muted, height: 1.6)),
+      ])),
+    ]),
+  );
+
+  Widget _prayerCard(AppColors c) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(18),
+    decoration: BoxDecoration(
+      gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [c.card, c.goldBg]),
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(color: c.gold, width: 1),
+    ),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [
+        Text('🙏', style: const TextStyle(fontSize: 18)),
+        const SizedBox(width: 8),
+        Text('A Prayer of Repentance', style: TextStyle(fontSize: 15, color: c.text, fontWeight: FontWeight.w800)),
+      ]),
+      const SizedBox(height: 14),
+      Text('አቤቱ እግዚአብሔር ሆይ፣ በታላቅ ምሕረትህ ማረኝ፤ እንደ ብዙ ርኅራኄህም መተላለፌን ደምስስ። ከበደሌ ፈጽሞ እጠበኝ ከኃጢአቴም አንጻኝ። አቤቱ ንጹሕ ልብን ፍጠርልኝ የቀናውንም መንፈስ በውስጤ አድስ።',
+        style: TextStyle(fontSize: 14, color: c.text, height: 2.0)),
+      const SizedBox(height: 12),
+      Text('Have mercy upon me, O God, according to Your great mercy; and according to the multitude of Your compassions, blot out my transgression. Wash me thoroughly from my iniquity, and cleanse me from my sin. Create in me a clean heart, O God, and renew a right spirit within me.',
+        style: TextStyle(fontSize: 12.5, color: c.muted, height: 1.8, fontStyle: FontStyle.italic)),
+      const SizedBox(height: 8),
+      Text('— Psalm 51 (መዝሙረ ዳዊት ፶)', style: TextStyle(fontSize: 12, color: c.gold, fontWeight: FontWeight.w700)),
+    ]),
+  );
+}
+
+
 class ConfessionHistoryScreen extends StatefulWidget {
   final bool isDark;
   const ConfessionHistoryScreen({super.key, required this.isDark});
@@ -4616,6 +5131,11 @@ class _ConfessionHistoryScreenState extends State<ConfessionHistoryScreen> {
 // PRIEST / FIND A CHURCH SCREEN
 // ═══════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════
+// PREMIUM MAP — Find a Church / Explore
+// Immersive full-screen map with glassmorphism UI
+// ═══════════════════════════════════════════════
+
 class PriestScreen extends StatefulWidget {
   final bool isDark;
   const PriestScreen({super.key, required this.isDark});
@@ -4623,415 +5143,1410 @@ class PriestScreen extends StatefulWidget {
   State<PriestScreen> createState() => _PriestScreenState();
 }
 
-class _PriestScreenState extends State<PriestScreen> {
-  double? _userLat, _userLng;
-  bool _loading = true;
+class _PriestScreenState extends State<PriestScreen> with TickerProviderStateMixin {
+  static const LatLng _addis = LatLng(9.0227, 38.7468);
+  static const Color _gold = Color(0xFFC9A84C);
+
+  final MapController _map = MapController();
+  final TextEditingController _searchCtrl = TextEditingController();
+  final FocusNode _searchFocus = FocusNode();
+
+  double? _lat, _lng;
+  bool _locating = true;
+  bool _busy = false;
   String _error = '';
-  Map<String, dynamic>? _selected;
-  bool _satellite = false;
-  final MapController _mapController = MapController();
 
-  // Verified EOTC churches in Addis Ababa
-  List<Map<String, dynamic>> _churches = [];
-  bool _loadingChurches = false;
+  int _style = 0; // 0 standard · 1 satellite · 2 hybrid · 3 terrain
+  double _rotation = 0;
+  double _zoom = 13.5;
+  LatLng _center = _addis;
+
+  List<Map<String, dynamic>> _places = [];
+  Map<String, dynamic>? _sel;
+  String _activeCategory = 'church_eotc';
+
+  bool _searchOpen = false;
+  List<Map<String, dynamic>> _suggestions = [];
+  List<String> _recents = [];
+  List<Map<String, dynamic>> _favorites = [];
+  Timer? _debounce;
+
+  // ── On-map route (free — OSRM, no Google Maps handoff) ──
+  List<LatLng> _routePoints = [];
+  bool _routing = false;
+  double? _routeDistanceKm;
+  int? _routeDurationMin;
+  String? _routeError;
+
+
+  late final AnimationController _pulse;
+
+  static const List<Map<String, String>> _categories = [
+    {'id': 'church_eotc', 'label': 'Churches', 'emoji': '⛪', 'type': 'church', 'keyword': 'Ethiopian Orthodox'},
+  ];
 
   @override
-  void initState() { super.initState(); _getLocation(); }
-
-  Future<void> _getLocation() async {
-    setState(() { _loading = true; _error = ''; });
-    try {
-      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) { setState(() { _loading = false; _error = 'Please enable location services'; }); return; }
-      LocationPermission perm = await Geolocator.checkPermission();
-      if (perm == LocationPermission.denied) perm = await Geolocator.requestPermission();
-      if (perm == LocationPermission.denied || perm == LocationPermission.deniedForever) {
-        setState(() { _loading = false; _error = 'Location permission denied'; }); return;
-      }
-      final pos = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
-      setState(() { _userLat = pos.latitude; _userLng = pos.longitude; _loading = false; });
-      await Future.delayed(const Duration(milliseconds: 500));
-      _mapController.move(LatLng(pos.latitude, pos.longitude), 14.0);
-      _fetchNearbyChurches(pos.latitude, pos.longitude);
-    } catch (e) {
-      setState(() { _loading = false; _error = 'Could not get location'; });
-    }
+  void initState() {
+    super.initState();
+    _pulse = AnimationController(vsync: this, duration: const Duration(seconds: 2))..repeat();
+    _loadSaved();
+    _initLocation();
   }
 
-  Future<void> _fetchNearbyChurches(double lat, double lng) async {
-    setState(() { _loadingChurches = true; });
-    try {
-      final allChurches = <Map<String, dynamic>>{};
-      // Search 1: EOTC specific
-      for (final keyword in ['Ethiopian Orthodox', 'Ethiopian Orthodox Tewahedo', 'EOTC']) {
-        final url = Uri.parse(
-          'https://maps.googleapis.com/maps/api/place/nearbysearch/json'
-          '?location=$lat,$lng&radius=10000&type=church'
-          '&keyword=${Uri.encodeComponent(keyword)}&key=$GOOGLE_API_KEY'
-        );
-        final client = HttpClient();
-        final req = await client.getUrl(url);
-        final resp = await req.close();
-        final body = await resp.transform(const Utf8Decoder()).join();
-        client.close();
-        final data = jsonDecode(body);
-        final results = data['results'] as List? ?? [];
-        for (final r in results) {
-          final loc = r['geometry']['location'];
-          final elat = (loc['lat'] as num).toDouble();
-          final elng = (loc['lng'] as num).toDouble();
-          final name = r['name'] as String? ?? 'Church';
-          final vicinity = r['vicinity'] as String? ?? '';
-          final dist = Geolocator.distanceBetween(lat, lng, elat, elng) / 1000;
-          allChurches.add({'name': name, 'sub': vicinity, 'lat': elat, 'lng': elng, 'dist': dist});
-        }
-      }
-      // Search 2: All nearby churches
-      final url2 = Uri.parse(
-        'https://maps.googleapis.com/maps/api/place/nearbysearch/json'
-        '?location=$lat,$lng&radius=5000&type=church&key=$GOOGLE_API_KEY'
-      );
-      final client2 = HttpClient();
-      final req2 = await client2.getUrl(url2);
-      final resp2 = await req2.close();
-      final body2 = await resp2.transform(const Utf8Decoder()).join();
-      client2.close();
-      final data2 = jsonDecode(body2);
-      final results2 = data2['results'] as List? ?? [];
-      for (final r in results2) {
-        final loc = r['geometry']['location'];
-        final elat = (loc['lat'] as num).toDouble();
-        final elng = (loc['lng'] as num).toDouble();
-        final name = r['name'] as String? ?? 'Church';
-        final vicinity = r['vicinity'] as String? ?? '';
-        final dist = Geolocator.distanceBetween(lat, lng, elat, elng) / 1000;
-        allChurches.add({'name': name, 'sub': vicinity, 'lat': elat, 'lng': elng, 'dist': dist});
-      }
-      final list = allChurches.toList();
-      list.sort((a, b) => (a['dist'] as double).compareTo(b['dist'] as double));
-      if (list.isNotEmpty) {
-        setState(() { _churches = list; _loadingChurches = false; });
-      } else {
-        setState(() { _loadingChurches = false; });
-      }
-    } catch (e) {
-      // Keep existing churches if API fails
-    }
+  @override
+  void dispose() {
+    _pulse.dispose();
+    _debounce?.cancel();
+    _searchCtrl.dispose();
+    _searchFocus.dispose();
+    super.dispose();
   }
 
-  List<Map<String, dynamic>> get _sortedChurches {
-    if (_userLat == null) return _churches;
-    final list = List<Map<String, dynamic>>.from(_churches);
-    list.sort((a, b) {
-      final da = Geolocator.distanceBetween(_userLat!, _userLng!, a['lat'] as double, a['lng'] as double);
-      final db = Geolocator.distanceBetween(_userLat!, _userLng!, b['lat'] as double, b['lng'] as double);
-      return da.compareTo(db);
+  // ── Persistence ──
+  Future<void> _loadSaved() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _recents = prefs.getStringList('map_recents') ?? [];
+      final favRaw = prefs.getString('map_favorites');
+      if (favRaw != null) {
+        _favorites = (jsonDecode(favRaw) as List).map((e) => Map<String, dynamic>.from(e)).toList();
+      }
     });
-    return list;
   }
 
-  double _dist(Map<String, dynamic> ch) {
-    if (_userLat == null) return 0;
-    return Geolocator.distanceBetween(_userLat!, _userLng!, ch['lat'] as double, ch['lng'] as double) / 1000;
+  Future<void> _saveRecent(String q) async {
+    if (q.trim().isEmpty) return;
+    _recents.remove(q);
+    _recents.insert(0, q);
+    if (_recents.length > 8) _recents = _recents.sublist(0, 8);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList('map_recents', _recents);
   }
 
-  void _openDirections(Map<String, dynamic> ch) async {
-    final lat = ch['lat'] as double;
-    final lng = ch['lng'] as double;
-    final url = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving');
-    if (await canLaunchUrl(url)) await launchUrl(url, mode: LaunchMode.externalApplication);
+  bool _isFav(Map<String, dynamic> p) =>
+      _favorites.any((f) => f['place_id'] == p['place_id']);
+
+  Future<void> _toggleFav(Map<String, dynamic> p) async {
+    setState(() {
+      if (_isFav(p)) {
+        _favorites.removeWhere((f) => f['place_id'] == p['place_id']);
+      } else {
+        _favorites.insert(0, p);
+      }
+    });
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('map_favorites', jsonEncode(_favorites));
   }
 
-  void _openGoogleMapsSearch() async {
-    if (_userLat == null) return;
-    final url = Uri.parse('https://www.google.com/maps/search/Ethiopian+Orthodox+Church/@$_userLat,$_userLng,14z');
-    if (await canLaunchUrl(url)) await launchUrl(url, mode: LaunchMode.externalApplication);
+  // ── Location ──
+  int _locFix = 0; // 0=retry gps · 1=open location settings · 2=open app settings
+  Future<void> _initLocation() async {
+    setState(() { _locating = true; _error = ''; _locFix = 0; });
+    try {
+      if (!await Geolocator.isLocationServiceEnabled()) {
+        setState(() { _locating = false; _error = 'Location is turned off on this phone.'; _locFix = 1; });
+        return;
+      }
+      var perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) perm = await Geolocator.requestPermission();
+      if (perm == LocationPermission.deniedForever) {
+        setState(() { _locating = false; _error = 'Location permission is blocked — allow it in Settings.'; _locFix = 2; });
+        return;
+      }
+      if (perm == LocationPermission.denied) {
+        setState(() { _locating = false; _error = 'Location permission denied.'; _locFix = 2; });
+        return;
+      }
+      Position? pos;
+      try {
+        pos = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.high,
+            timeLimit: Duration(seconds: 10),
+          ),
+        );
+      } catch (_) {
+        pos = await Geolocator.getLastKnownPosition();
+      }
+      if (pos != null) {
+        setState(() { _lat = pos!.latitude; _lng = pos.longitude; _locating = false; });
+        await Future.delayed(const Duration(milliseconds: 250));
+        _flyTo(LatLng(pos.latitude, pos.longitude), 14.2);
+      } else {
+        setState(() { _locating = false; _error = 'Could not get your exact location — showing Addis Ababa.'; });
+      }
+      _loadCategory(_activeCategory);
+    } catch (_) {
+      if (mounted) setState(() { _locating = false; _error = 'Could not get your location.'; });
+      _loadCategory(_activeCategory);
+    }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final c = AppColors(widget.isDark);
-    final sorted = _sortedChurches;
+  // ── Networking (FREE: OpenStreetMap — no key, no billing) ──
+  Future<String?> _httpGet(String url) async {
+    try {
+      final client = HttpClient();
+      client.connectionTimeout = const Duration(seconds: 15);
+      final req = await client.getUrl(Uri.parse(url));
+      req.headers.set(HttpHeaders.userAgentHeader, 'YenefsAbat/1.0 (EOTC app; bekielias23@gmail.com)');
+      final resp = await req.close();
+      final body = await resp.transform(const Utf8Decoder()).join();
+      client.close();
+      return body;
+    } catch (_) {
+      return null;
+    }
+  }
 
-    return Scaffold(
-      backgroundColor: c.bg,
-      body: SafeArea(child: Column(children: [
-        // Header
-        Container(
-          color: c.hero, padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-          child: Row(children: [
-            Container(width: 4, height: 20, color: c.gold, margin: const EdgeInsets.only(right: 10)),
-            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('FIND A CHURCH', style: TextStyle(fontSize: 15, color: c.text, letterSpacing: 2, fontWeight: FontWeight.w800)),
-              Text('ቅርብ ቤተ ክርስቲያን ፈልግ', style: TextStyle(fontSize: 11, color: c.muted, fontStyle: FontStyle.italic)),
-            ]),
-            const Spacer(),
-            GestureDetector(
-              onTap: _openGoogleMapsSearch,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(color: c.goldBg, borderRadius: BorderRadius.circular(16), border: Border.all(color: c.gold, width: 0.5)),
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  Icon(Icons.search, color: c.gold, size: 14),
-                  const SizedBox(width: 4),
-                  Text('Search All', style: TextStyle(fontSize: 10, color: c.gold, fontWeight: FontWeight.w600)),
+  Future<String?> _httpPost(String url, String data) async {
+    try {
+      final client = HttpClient();
+      client.connectionTimeout = const Duration(seconds: 25);
+      final req = await client.postUrl(Uri.parse(url));
+      req.headers.set(HttpHeaders.userAgentHeader, 'YenefsAbat/1.0 (EOTC app; bekielias23@gmail.com)');
+      req.headers.contentType = ContentType('application', 'x-www-form-urlencoded', charset: 'utf-8');
+      req.write(data);
+      final resp = await req.close();
+      final body = await resp.transform(const Utf8Decoder()).join();
+      client.close();
+      return body;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void _apiProblem(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg), duration: const Duration(seconds: 4)));
+  }
+
+  void _computeDistances(List<Map<String, dynamic>> list) {
+    if (_lat == null) return;
+    for (final p in list) {
+      p['dist'] = Geolocator.distanceBetween(_lat!, _lng!, p['lat'] as double, p['lng'] as double) / 1000;
+    }
+    list.sort((a, b) => ((a['dist'] as double?) ?? 99).compareTo((b['dist'] as double?) ?? 99));
+  }
+
+  // Nearby churches via Overpass (OpenStreetMap) — races two servers for speed
+  Future<String?> _overpassFetch(String q) async {
+    final data = 'data=${Uri.encodeComponent(q)}';
+    final results = await Future.wait([
+      _httpPost('https://overpass.kumi.systems/api/interpreter', data),
+      _httpPost('https://overpass-api.de/api/interpreter', data),
+    ].map((f) => f.timeout(const Duration(seconds: 18), onTimeout: () => null)));
+    for (final r in results) {
+      if (r != null && r.trimLeft().startsWith('{')) return r;
+    }
+    return null;
+  }
+
+  static const List<String> _eotcInclude = [
+    'ኦርቶዶክስ','ተዋሕዶ','ተዋህዶ','ቅዱስ','ቅድስት','ማርያም','መድኃኔ','መድሃኔ','መድኀኔ','ሥላሴ','ስላሴ',
+    'ሚካኤል','ገብርኤል','ጊዮርጊስ','ኪዳነ','ተክለ','አማኑኤል','ጽዮን','መስቀል','ላሊበላ','አቡነ','ኡራኤል','ሩፋኤል','አርሴማ','ዮሐንስ',
+    'ደብረ','ልደታ','በዓታ','ቁስቋም','መንበረ','ጴጥሮስ','ጳውሎስ','እስጢፋኖስ','መርቆሬዎስ','ቂርቆስ','እየሱስ','ኢየሱስ','እግዚአብሔር','ፈለገ','ምሕረት','ቤተ ክርስቲያን','ቤተክርስቲያን',
+    'ethiopian orthodox','tewahedo','tewahdo','medhane','medhani','medhanialem','kidane','selassie','silassie','selasse',
+    'st. mary','st mary','mariam','maryam','michael','mikael','gabriel','giorgis','george','trinity','emmanuel','amanuel',
+    'tsion','abune','cherkos','kirkos','urael','rufael','debre','lideta','estifanos','petros','paulos','markos','yohannes','eotc','orthodox'
+  ];
+  static const List<String> _eotcReject = [
+    'protestant','pentecost','catholic','baptist','adventist','lutheran','anglican',
+    'evangelical','jehovah','mormon','latter','mekane yesus','kale heywet','kale hiwot',
+    'mulu wongel','full gospel','መካነ ኢየሱስ','ቃለ ህይወት','ሙሉ ወንጌል','ካቶሊክ','ፕሮቴስታንት','ጴንጤ','መስጊድ','mosque'
+  ];
+
+  Future<void> _loadCategory(String id) async {
+    final lat = _lat ?? _addis.latitude, lng = _lng ?? _addis.longitude;
+    setState(() { _busy = true; _activeCategory = id; _sel = null; });
+    // Single fast query — all christian places of worship; EOTC filtering happens locally
+    final q = '[out:json][timeout:15];'
+        'nwr["amenity"="place_of_worship"](around:11000,$lat,$lng);'
+        'out center 200;';
+    final body = await _overpassFetch(q);
+    if (!mounted) return;
+    if (body == null) {
+      setState(() => _busy = false);
+      _apiProblem('No internet — could not load churches');
+      return;
+    }
+    try {
+      final data = jsonDecode(body) as Map<String, dynamic>;
+      final elements = data['elements'] as List? ?? [];
+      final list = <Map<String, dynamic>>[];
+      final seen = <String>{};
+      for (final el in elements) {
+        double? elat, elng;
+        if (el['type'] == 'node') {
+          elat = (el['lat'] as num?)?.toDouble();
+          elng = (el['lon'] as num?)?.toDouble();
+        } else if (el['center'] != null) {
+          elat = (el['center']['lat'] as num?)?.toDouble();
+          elng = (el['center']['lon'] as num?)?.toDouble();
+        }
+        if (elat == null || elng == null) continue;
+        final tags = (el['tags'] as Map?) ?? {};
+        final nameAm = (tags['name:am'] ?? '').toString().trim();
+        final nameAny = (tags['name'] ?? tags['name:en'] ?? '').toString().trim();
+        final name = nameAm.isNotEmpty ? nameAm : nameAny;
+        if (name.isEmpty) continue; // exact names only
+        final religion = (tags['religion'] ?? '').toString().toLowerCase();
+        if (religion.isNotEmpty && religion != 'christian') continue;
+        final denom = (tags['denomination'] ?? '').toString().toLowerCase();
+        final lowName = ('$nameAny $nameAm').toLowerCase();
+        bool rejected = false;
+        for (final r in _eotcReject) {
+          if (denom.contains(r) || lowName.contains(r)) { rejected = true; break; }
+        }
+        if (rejected) continue;
+        bool included = denom.contains('ethiopian') || denom.contains('tewahedo') || denom.contains('orthodox');
+        if (!included) {
+          for (final k in _eotcInclude) {
+            if (lowName.contains(k) || (nameAm + nameAny).contains(k)) { included = true; break; }
+          }
+        }
+        if (!included) continue;
+        final id2 = '${el['type']}${el['id']}';
+        if (seen.contains(id2)) continue;
+        seen.add(id2);
+        list.add({
+          'place_id': id2,
+          'name': name,
+          'sub': nameAm.isNotEmpty && nameAny.isNotEmpty && nameAm != nameAny ? nameAny : 'Ethiopian Orthodox Tewahedo',
+          'lat': elat,
+          'lng': elng,
+          'rating': null, 'ratings': null, 'open': null,
+        });
+      }
+      _computeDistances(list);
+      setState(() { _places = list; _busy = false; });
+      if (list.isEmpty) _apiProblem('No churches found nearby on the map data');
+    } catch (_) {
+      setState(() => _busy = false);
+      _apiProblem('Could not read church data');
+    }
+  }
+
+  // Text search via Nominatim (OpenStreetMap)
+  Future<List<Map<String, dynamic>>> _nominatim(String q) async {
+    final lat = _lat ?? _addis.latitude, lng = _lng ?? _addis.longitude;
+    final url = 'https://nominatim.openstreetmap.org/search'
+        '?q=${Uri.encodeComponent(q)}'
+        '&format=json&limit=8&addressdetails=0&accept-language=am,en'
+        '&viewbox=${lng - 0.35},${lat + 0.35},${lng + 0.35},${lat - 0.35}';
+    final body = await _httpGet(url);
+    if (body == null) return [];
+    try {
+      final data = jsonDecode(body) as List;
+      final list = <Map<String, dynamic>>[];
+      for (final r in data) {
+        final dn = (r['display_name'] as String? ?? '');
+        final parts = dn.split(',');
+        list.add({
+          'place_id': 'nom${r['place_id']}',
+          'name': parts.isNotEmpty ? parts.first.trim() : dn,
+          'sub': parts.length > 1 ? parts.sublist(1).join(',').trim() : '',
+          'lat': double.parse(r['lat'] as String),
+          'lng': double.parse(r['lon'] as String),
+          'rating': null,
+          'ratings': null,
+          'open': null,
+        });
+      }
+      _computeDistances(list);
+      return list;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> _runSearch(String q) async {
+    if (q.trim().isEmpty) return;
+    setState(() => _busy = true);
+    final list = await _nominatim(q);
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _suggestions = [];
+      _searchOpen = false;
+      if (list.isNotEmpty) _places = list;
+    });
+    _searchFocus.unfocus();
+    await _saveRecent(q);
+    if (list.isNotEmpty) {
+      final first = list.first;
+      _flyTo(LatLng(first['lat'] as double, first['lng'] as double), 15.0);
+      setState(() => _sel = first);
+    } else {
+      _apiProblem('Nothing found for "$q" — try a different name');
+    }
+  }
+
+  void _onSearchChanged(String q) {
+    _debounce?.cancel();
+    if (q.trim().length < 2) { setState(() => _suggestions = []); return; }
+    _debounce = Timer(const Duration(milliseconds: 650), () async {
+      final list = await _nominatim(q);
+      if (!mounted) return;
+      setState(() => _suggestions = list.take(6).toList());
+    });
+  }
+
+  // ── Camera ──
+  void _flyTo(LatLng dest, double destZoom) {
+    final cam = _map.camera;
+    final latT = Tween<double>(begin: cam.center.latitude, end: dest.latitude);
+    final lngT = Tween<double>(begin: cam.center.longitude, end: dest.longitude);
+    final zT = Tween<double>(begin: cam.zoom, end: destZoom);
+    final ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 650));
+    final anim = CurvedAnimation(parent: ctrl, curve: Curves.easeInOutCubic);
+    ctrl.addListener(() {
+      _map.move(LatLng(latT.evaluate(anim), lngT.evaluate(anim)), zT.evaluate(anim));
+    });
+    anim.addStatusListener((s) { if (s == AnimationStatus.completed) ctrl.dispose(); });
+    ctrl.forward();
+  }
+
+  void _resetNorth() {
+    final cam = _map.camera;
+    final rT = Tween<double>(begin: cam.rotation, end: 0);
+    final ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 420));
+    final anim = CurvedAnimation(parent: ctrl, curve: Curves.easeOutCubic);
+    ctrl.addListener(() => _map.rotate(rT.evaluate(anim)));
+    anim.addStatusListener((s) { if (s == AnimationStatus.completed) ctrl.dispose(); });
+    ctrl.forward();
+  }
+
+  void _selectPlace(Map<String, dynamic> p) {
+    if (_sel != null && _sel!['place_id'] != p['place_id']) _clearRoute();
+    setState(() => _sel = p);
+    _flyTo(LatLng(p['lat'] as double, p['lng'] as double), math.max(_zoom, 15.5));
+  }
+
+  Future<void> _openDirections(Map<String, dynamic> p) async {
+    final lat = p['lat'], lng = p['lng'];
+    final app = Uri.parse('google.navigation:q=$lat,$lng&mode=d');
+    final web = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving');
+    if (await canLaunchUrl(app)) {
+      await launchUrl(app, mode: LaunchMode.externalApplication);
+    } else {
+      await launchUrl(web, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  // ── On-map route drawing — free, OSRM public router, stays inside the app ──
+  void _clearRoute() {
+    setState(() { _routePoints = []; _routeDistanceKm = null; _routeDurationMin = null; _routeError = null; });
+  }
+
+  Future<void> _showRoute(Map<String, dynamic> p) async {
+    if (_lat == null || _lng == null) {
+      setState(() => _routeError = 'Turn on location to draw a route.');
+      return;
+    }
+    final from = LatLng(_lat!, _lng!);
+    final to = LatLng(p['lat'] as double, p['lng'] as double);
+    setState(() { _routing = true; _routeError = null; });
+    try {
+      final client = HttpClient();
+      client.connectionTimeout = const Duration(seconds: 15);
+      final uri = Uri.parse(
+        'https://router.project-osrm.org/route/v1/driving/'
+        '${from.longitude},${from.latitude};${to.longitude},${to.latitude}'
+        '?overview=full&geometries=geojson',
+      );
+      final req = await client.getUrl(uri);
+      final resp = await req.close();
+      final body = await resp.transform(const Utf8Decoder()).join();
+      client.close();
+      if (resp.statusCode != 200) {
+        setState(() { _routing = false; _routeError = 'Could not fetch a route right now.'; });
+        return;
+      }
+      final data = jsonDecode(body) as Map<String, dynamic>;
+      final routes = data['routes'] as List?;
+      if (routes == null || routes.isEmpty) {
+        setState(() { _routing = false; _routeError = 'No route found to this church.'; });
+        return;
+      }
+      final route = routes.first as Map<String, dynamic>;
+      final coords = (route['geometry']['coordinates'] as List)
+          .map((c) => LatLng((c as List)[1] as double, c[0] as double))
+          .toList();
+      if (!mounted) return;
+      setState(() {
+        _routePoints = coords;
+        _routeDistanceKm = (route['distance'] as num) / 1000.0;
+        _routeDurationMin = ((route['duration'] as num) / 60).round();
+        _routing = false;
+      });
+      _fitRoute(from, to);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() { _routing = false; _routeError = 'Network error — could not draw route.'; });
+    }
+  }
+
+  void _fitRoute(LatLng from, LatLng to) {
+    final bounds = LatLngBounds.fromPoints([from, to]);
+    _map.fitCamera(CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.fromLTRB(60, 220, 60, 260)));
+  }
+
+  Future<void> _sharePlace(Map<String, dynamic> p) async {
+    final url = Uri.parse('https://www.google.com/maps/search/?api=1&query=${p['lat']},${p['lng']}');
+    await launchUrl(url, mode: LaunchMode.externalApplication);
+  }
+
+  Future<void> _openInGoogleMaps() async {
+    final lat = _lat ?? _addis.latitude, lng = _lng ?? _addis.longitude;
+    final url = Uri.parse('https://www.google.com/maps/search/Ethiopian+Orthodox+Church/@$lat,$lng,14z');
+    await launchUrl(url, mode: LaunchMode.externalApplication);
+  }
+
+  void _showNearbyList() {
+    final dark = widget.isDark;
+    final onGlass = dark ? Colors.white : const Color(0xFF15130E);
+    final muted = dark ? Colors.white60 : Colors.black54;
+    bool kicked = false;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setSheet) {
+        if (_places.isEmpty && !_busy && !kicked) {
+          kicked = true;
+          _loadCategory('church_eotc').then((_) { if (ctx.mounted) setSheet(() {}); });
+        }
+        return Padding(
+          padding: const EdgeInsets.all(12),
+          child: _glass(dark,
+            radius: BorderRadius.circular(26),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(18, 14, 18, 20),
+              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Center(child: Container(width: 38, height: 4,
+                  decoration: BoxDecoration(color: onGlass.withAlpha(60), borderRadius: BorderRadius.circular(3)))),
+                const SizedBox(height: 14),
+                Row(children: [
+                  const Text('⛪', style: TextStyle(fontSize: 18)),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text('Churches near you', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: onGlass))),
+                  if (_places.isNotEmpty)
+                    Text('${_places.length} found', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: _gold)),
                 ]),
-              ),
-            ),
-            const SizedBox(width: 8),
-            GestureDetector(
-              onTap: () => setState(() => _satellite = !_satellite),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(color: _satellite ? c.gold : c.goldBg, borderRadius: BorderRadius.circular(16), border: Border.all(color: c.gold, width: 0.5)),
-                child: Text('Satellite', style: TextStyle(fontSize: 10, color: _satellite ? (widget.isDark ? const Color(0xFF0F0505) : Colors.white) : c.gold, fontWeight: FontWeight.w600)),
-              ),
-            ),
-            const SizedBox(width: 8),
-            GestureDetector(
-              onTap: _getLocation,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(color: c.goldBg, borderRadius: BorderRadius.circular(16), border: Border.all(color: c.gold, width: 0.5)),
-                child: Icon(Icons.my_location, color: c.gold, size: 16),
-              ),
-            ),
-          ]),
-        ),
-        Divider(color: c.border, height: 0.5),
-
-        // Map
-        SizedBox(
-          height: 280,
-          child: _loading
-              ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                  CircularProgressIndicator(color: c.gold),
-                  const SizedBox(height: 12),
-                  Text('Getting your location...', style: TextStyle(color: c.muted, fontSize: 12)),
-                ]))
-              : _error.isNotEmpty
-                  ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                      Icon(Icons.location_off, color: c.muted, size: 36),
-                      const SizedBox(height: 8),
-                      Text(_error, style: TextStyle(color: c.muted, fontSize: 12), textAlign: TextAlign.center),
+                const SizedBox(height: 6),
+                if (_busy)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 30),
+                    child: Center(child: Column(children: [
+                      const CircularProgressIndicator(color: _gold),
                       const SizedBox(height: 12),
-                      GestureDetector(onTap: _getLocation, child: Container(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), decoration: BoxDecoration(color: c.gold, borderRadius: BorderRadius.circular(10)), child: Text('Try Again', style: TextStyle(color: widget.isDark ? const Color(0xFF0F0505) : Colors.white, fontWeight: FontWeight.w700)))),
-                    ]))
-                  : Stack(children: [
-                      FlutterMap(
-                        mapController: _mapController,
-                        options: MapOptions(
-                          initialCenter: LatLng(_userLat ?? 9.0227, _userLng ?? 38.7468),
-                          initialZoom: 13.5,
-                          minZoom: 3, maxZoom: 19,
-                          onTap: (_, _) => setState(() => _selected = null),
-                        ),
-                        children: [
-                          TileLayer(
-                            urlTemplate: _satellite
-                                ? 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
-                                : 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                            userAgentPackageName: 'com.yenefsabat.yenefs_abat',
+                      Text('Searching nearby churches…', style: TextStyle(color: muted, fontSize: 13)),
+                    ])),
+                  )
+                else if (_places.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 24),
+                    child: Center(child: Column(children: [
+                      Text('Could not load churches.', style: TextStyle(color: muted, fontSize: 13)),
+                      const SizedBox(height: 4),
+                      Text('Check your internet connection and retry.', style: TextStyle(color: muted, fontSize: 11.5)),
+                      const SizedBox(height: 14),
+                      GestureDetector(
+                        onTap: () {
+                          _loadCategory('church_eotc').then((_) { if (ctx.mounted) setSheet(() {}); });
+                          setSheet(() {});
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 11),
+                          decoration: BoxDecoration(
+                            gradient: const LinearGradient(colors: [Color(0xFFE3C878), _gold]),
+                            borderRadius: BorderRadius.circular(14),
                           ),
-                          MarkerLayer(markers: [
-                            if (_userLat != null)
-                              Marker(
-                                point: LatLng(_userLat!, _userLng!),
-                                width: 44, height: 44,
+                          child: const Text('Retry', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13)),
+                        ),
+                      ),
+                    ])),
+                  )
+                else
+                  ConstrainedBox(
+                    constraints: BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.55),
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: _places.length > 30 ? 30 : _places.length,
+                      itemBuilder: (_, i) {
+                        final p = _places[i];
+                        final d = p['dist'] as double?;
+                        return InkWell(
+                          onTap: () { Navigator.pop(ctx); _selectPlace(p); },
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 9),
+                            child: Row(children: [
+                              Container(
+                                width: 42, height: 42,
+                                decoration: BoxDecoration(
+                                  gradient: const LinearGradient(colors: [Color(0xFFE3C878), _gold]),
+                                  borderRadius: BorderRadius.circular(13),
+                                ),
+                                child: const Center(child: Text('⛪', style: TextStyle(fontSize: 20))),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                Text(p['name'] as String, maxLines: 1, overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(color: onGlass, fontSize: 13.5, fontWeight: FontWeight.w700)),
+                                const SizedBox(height: 2),
+                                Row(children: [
+                                  if (d != null) ...[
+                                    Icon(Icons.near_me_rounded, size: 11, color: _gold),
+                                    const SizedBox(width: 3),
+                                    Text('${d.toStringAsFixed(1)} km', style: TextStyle(color: _gold, fontSize: 11, fontWeight: FontWeight.w700)),
+                                    const SizedBox(width: 8),
+                                  ],
+                                  if ((p['sub'] as String? ?? '').isNotEmpty)
+                                    Expanded(child: Text(p['sub'] as String, maxLines: 1, overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(color: muted, fontSize: 11))),
+                                ]),
+                              ])),
+                              GestureDetector(
+                                onTap: () { Navigator.pop(ctx); _openDirections(p); },
                                 child: Container(
-                                  decoration: BoxDecoration(color: const Color(0xFF2196F3), shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 3), boxShadow: [BoxShadow(color: Colors.blue.withAlpha(100), blurRadius: 10)]),
-                                  child: const Icon(Icons.person_pin, color: Colors.white, size: 22),
+                                  width: 38, height: 38,
+                                  decoration: BoxDecoration(color: _gold.withAlpha(45), borderRadius: BorderRadius.circular(12)),
+                                  child: Icon(Icons.directions_rounded, color: _gold, size: 19),
                                 ),
                               ),
-                            ...sorted.map((ch) {
-                              final isSel = _selected == ch;
-                              return Marker(
-                                point: LatLng(ch['lat'] as double, ch['lng'] as double),
-                                width: isSel ? 64 : 50,
-                                height: isSel ? 78 : 62,
-                                alignment: Alignment.bottomCenter,
-                                child: GestureDetector(
-                                  behavior: HitTestBehavior.opaque,
-                                  onTap: () {
-                                    setState(() => _selected = ch);
-                                    _mapController.move(LatLng(ch['lat'] as double, ch['lng'] as double), 15.0);
-                                  },
-                                  child: Column(mainAxisSize: MainAxisSize.min, children: [
-                                    Container(
-                                      width: isSel ? 54 : 42,
-                                      height: isSel ? 54 : 42,
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFFC9A84C),
-                                        shape: BoxShape.circle,
-                                        border: Border.all(color: Colors.white, width: isSel ? 3 : 2.5),
-                                        boxShadow: [
-                                          BoxShadow(color: Colors.black.withAlpha(180), blurRadius: 6, offset: const Offset(0, 3)),
-                                          BoxShadow(color: const Color(0xFFC9A84C).withAlpha(80), blurRadius: 10, spreadRadius: 1),
-                                        ],
-                                      ),
-                                      child: Center(child: Text('⛪', style: TextStyle(fontSize: isSel ? 26 : 20))),
-                                    ),
-                                    Container(
-                                      width: isSel ? 6 : 5,
-                                      height: isSel ? 16 : 12,
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFFC9A84C),
-                                        borderRadius: BorderRadius.circular(3),
-                                        boxShadow: [BoxShadow(color: Colors.black.withAlpha(80), blurRadius: 3)],
-                                      ),
-                                    ),
-                                  ]),
-                                ),
-                              );
-                            }),
-                          ]),
-                        ],
-                      ),
-                      // Zoom controls
-                      Positioned(right: 10, top: 10, child: Column(children: [
-                        Container(width: 36, height: 36, margin: const EdgeInsets.only(bottom: 6),
-                          decoration: BoxDecoration(color: c.card, shape: BoxShape.circle, border: Border.all(color: c.border), boxShadow: [BoxShadow(color: Colors.black.withAlpha(40), blurRadius: 4)]),
-                          child: Center(child: Text('N', style: TextStyle(fontSize: 12, color: c.gold, fontWeight: FontWeight.w900)))),
-                        GestureDetector(onTap: () => _mapController.move(_mapController.camera.center, _mapController.camera.zoom + 1),
-                          child: Container(width: 36, height: 36, decoration: BoxDecoration(color: c.card, borderRadius: const BorderRadius.vertical(top: Radius.circular(8)), border: Border.all(color: c.border)), child: Center(child: Icon(Icons.add, color: c.text, size: 20)))),
-                        Container(height: 0.5, width: 36, color: c.border),
-                        GestureDetector(onTap: () => _mapController.move(_mapController.camera.center, _mapController.camera.zoom - 1),
-                          child: Container(width: 36, height: 36, decoration: BoxDecoration(color: c.card, borderRadius: const BorderRadius.vertical(bottom: Radius.circular(8)), border: Border.all(color: c.border)), child: Center(child: Icon(Icons.remove, color: c.text, size: 20)))),
-                      ])),
-                      // Selected popup
-                      if (_selected != null)
-                        Positioned(bottom: 10, left: 10, right: 10, child: Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(color: c.card, borderRadius: BorderRadius.circular(14), border: Border.all(color: c.gold, width: 1.5), boxShadow: [BoxShadow(color: Colors.black.withAlpha(80), blurRadius: 12)]),
-                          child: Row(children: [
-                            Container(width: 44, height: 44, decoration: BoxDecoration(color: c.goldBg, borderRadius: BorderRadius.circular(12), border: Border.all(color: c.gold)), child: const Center(child: Text('⛪', style: TextStyle(fontSize: 24)))),
-                            const SizedBox(width: 10),
-                            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                              Text(_selected!['name'] as String, style: TextStyle(fontSize: 13, color: c.text, fontWeight: FontWeight.w800), maxLines: 2, overflow: TextOverflow.ellipsis),
-                              Text('${_dist(_selected!).toStringAsFixed(1)} km away', style: TextStyle(fontSize: 11, color: c.gold, fontWeight: FontWeight.w600)),
-                            ])),
-                            GestureDetector(onTap: () => _openDirections(_selected!), child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                              decoration: BoxDecoration(color: c.gold, borderRadius: BorderRadius.circular(10)),
-                              child: Column(mainAxisSize: MainAxisSize.min, children: [
-                                Icon(Icons.directions, color: widget.isDark ? const Color(0xFF0F0505) : Colors.white, size: 18),
-                                Text('Go', style: TextStyle(fontSize: 10, color: widget.isDark ? const Color(0xFF0F0505) : Colors.white, fontWeight: FontWeight.w800)),
-                              ]),
-                            )),
-                          ]),
-                        )),
-                    ]),
-        ),
-        Divider(color: c.border, height: 0.5),
-
-        // Church list below map
-        Expanded(
-          child: ListView.builder(
-            padding: const EdgeInsets.all(12),
-            itemCount: sorted.length,
-            itemBuilder: (context, i) {
-              final ch = sorted[i];
-              final dist = _dist(ch);
-              final isSel = _selected == ch;
-              return GestureDetector(
-                onTap: () {
-                  setState(() => _selected = ch);
-                  _mapController.move(LatLng(ch['lat'] as double, ch['lng'] as double), 15.0);
-                },
-                child: Container(
-                  margin: const EdgeInsets.only(bottom: 10),
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: isSel ? c.goldBg : c.card,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: isSel ? c.gold : c.border, width: isSel ? 1.5 : 0.5),
-                    boxShadow: [BoxShadow(color: Colors.black.withAlpha(8), blurRadius: 6, offset: const Offset(0, 2))],
+                            ]),
+                          ),
+                        );
+                      },
+                    ),
                   ),
-                  child: Row(children: [
-                    Container(width: 44, height: 44, decoration: BoxDecoration(color: c.goldBg, borderRadius: BorderRadius.circular(12), border: Border.all(color: c.gold, width: 0.5)), child: const Center(child: Text('⛪', style: TextStyle(fontSize: 22)))),
-                    const SizedBox(width: 12),
-                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text(ch['name'] as String, style: TextStyle(fontSize: 14, color: c.text, fontWeight: FontWeight.w700)),
-                      Text(ch['sub'] as String, style: TextStyle(fontSize: 11, color: c.muted)),
-                      if (_userLat != null) Row(children: [
-                        Icon(Icons.location_on, color: c.gold, size: 11),
-                        const SizedBox(width: 2),
-                        Text('${dist.toStringAsFixed(1)} km away', style: TextStyle(fontSize: 11, color: c.gold, fontWeight: FontWeight.w600)),
-                      ]),
-                    ])),
-                    GestureDetector(
-                      onTap: () => _openDirections(ch),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        decoration: BoxDecoration(color: c.gold, borderRadius: BorderRadius.circular(10)),
+              ]),
+            ),
+          ),
+        );
+      }),
+    );
+  }
+
+  // ── Derived ──
+  String _scaleLabel() {
+    final mpp = 156543.03392 * math.cos(_center.latitude * math.pi / 180) / math.pow(2, _zoom);
+    final target = mpp * 80; // ~80px bar
+    const steps = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000];
+    num best = steps.first;
+    for (final s in steps) { if (s <= target) best = s; }
+    return best >= 1000 ? '${(best / 1000).toStringAsFixed(0)} km' : '$best m';
+  }
+
+  double _scaleWidth() {
+    final mpp = 156543.03392 * math.cos(_center.latitude * math.pi / 180) / math.pow(2, _zoom);
+    final target = mpp * 80;
+    const steps = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000];
+    num best = steps.first;
+    for (final s in steps) { if (s <= target) best = s; }
+    return (best / mpp).clamp(30, 140).toDouble();
+  }
+
+  String _eta(Map<String, dynamic> p) {
+    final d = (p['dist'] as double?) ?? 0;
+    final walk = (d / 4.5 * 60).round();
+    final drive = math.max(1, (d / 28 * 60).round());
+    return '🚶 $walk min  ·  🚗 $drive min';
+  }
+
+  // ══════════════════ UI ══════════════════
+  @override
+  Widget build(BuildContext context) {
+    final dark = widget.isDark;
+    final onGlass = dark ? Colors.white : const Color(0xFF15130E);
+    final muted = dark ? Colors.white60 : Colors.black54;
+
+    return Scaffold(
+      backgroundColor: dark ? const Color(0xFF0D0B08) : const Color(0xFFF3EFE7),
+      body: Stack(children: [
+        // ── MAP ──
+        Positioned.fill(
+          child: FlutterMap(
+            mapController: _map,
+            options: MapOptions(
+              initialCenter: _addis,
+              initialZoom: 13.5,
+              minZoom: 3,
+              maxZoom: 19,
+              interactionOptions: const InteractionOptions(flags: InteractiveFlag.all),
+              onTap: (_, _) { _clearRoute(); setState(() { _sel = null; _searchOpen = false; }); _searchFocus.unfocus(); },
+              onMapEvent: (e) {
+                final cam = _map.camera;
+                final r = cam.rotation, z = cam.zoom;
+                if ((r - _rotation).abs() > 1.0 || (z - _zoom).abs() > 0.15 ||
+                    (cam.center.latitude - _center.latitude).abs() > 0.004 ||
+                    (cam.center.longitude - _center.longitude).abs() > 0.004) {
+                  setState(() { _rotation = r; _zoom = z; _center = cam.center; });
+                }
+              },
+            ),
+            children: [
+              // Base tiles per style (original styling via open tile providers)
+              if (_style == 0)
+                TileLayer(
+                  urlTemplate: dark
+                      ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+                      : 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+                  subdomains: const ['a', 'b', 'c', 'd'],
+                  retinaMode: RetinaMode.isHighDensity(context),
+                  keepBuffer: 6,
+                  panBuffer: 2,
+                  userAgentPackageName: 'com.yenefsabat.yenefs_abat',
+                ),
+              if (_style == 1 || _style == 2)
+                TileLayer(
+                  urlTemplate: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                  keepBuffer: 6,
+                  panBuffer: 2,
+                  userAgentPackageName: 'com.yenefsabat.yenefs_abat',
+                ),
+              if (_style == 2)
+                TileLayer(
+                  urlTemplate: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}{r}.png',
+                  subdomains: const ['a', 'b', 'c', 'd'],
+                  retinaMode: RetinaMode.isHighDensity(context),
+                  keepBuffer: 6,
+                  panBuffer: 2,
+                  userAgentPackageName: 'com.yenefsabat.yenefs_abat',
+                ),
+              if (_style == 3)
+                TileLayer(
+                  urlTemplate: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+                  subdomains: const ['a', 'b', 'c'],
+                  keepBuffer: 6,
+                  panBuffer: 2,
+                  userAgentPackageName: 'com.yenefsabat.yenefs_abat',
+                ),
+
+              if (_routePoints.isNotEmpty)
+                PolylineLayer(polylines: [
+                  Polyline(points: _routePoints, strokeWidth: 5, color: _gold, borderColor: Colors.white, borderStrokeWidth: 1.5),
+                ]),
+
+              MarkerLayer(markers: [
+                // Pulsing user dot
+                if (_lat != null)
+                  Marker(
+                    point: LatLng(_lat!, _lng!),
+                    width: 70, height: 70,
+                    child: AnimatedBuilder(
+                      animation: _pulse,
+                      builder: (_, _) {
+                        final t = _pulse.value;
+                        return Stack(alignment: Alignment.center, children: [
+                          Container(
+                            width: 26 + 40 * t, height: 26 + 40 * t,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: const Color(0xFF2E7CF6).withAlpha(((1 - t) * 70).round()),
+                            ),
+                          ),
+                          Container(
+                            width: 22, height: 22,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: const Color(0xFF2E7CF6),
+                              border: Border.all(color: Colors.white, width: 3),
+                              boxShadow: [BoxShadow(color: Colors.black.withAlpha(90), blurRadius: 8, offset: const Offset(0, 2))],
+                            ),
+                          ),
+                        ]);
+                      },
+                    ),
+                  ),
+                // Place markers
+                ..._places.take(60).map((p) {
+                  final sel = identical(_sel, p) || (_sel != null && _sel!['place_id'] == p['place_id']);
+                  final emoji = _categories.firstWhere((c) => c['id'] == _activeCategory, orElse: () => _categories.first)['emoji']!;
+                  return Marker(
+                    point: LatLng(p['lat'] as double, p['lng'] as double),
+                    width: sel ? 64 : 46,
+                    height: sel ? 80 : 58,
+                    alignment: Alignment.bottomCenter,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => _selectPlace(p),
+                      child: AnimatedScale(
+                        scale: sel ? 1.0 : 0.92,
+                        duration: const Duration(milliseconds: 180),
                         child: Column(mainAxisSize: MainAxisSize.min, children: [
-                          Icon(Icons.directions, color: widget.isDark ? const Color(0xFF0F0505) : Colors.white, size: 18),
-                          Text('Go', style: TextStyle(fontSize: 10, color: widget.isDark ? const Color(0xFF0F0505) : Colors.white, fontWeight: FontWeight.w700)),
+                          Container(
+                            width: sel ? 54 : 40, height: sel ? 54 : 40,
+                            decoration: BoxDecoration(
+                              gradient: const LinearGradient(
+                                begin: Alignment.topLeft, end: Alignment.bottomRight,
+                                colors: [Color(0xFFE3C878), _gold, Color(0xFF9C7E2E)],
+                              ),
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.white, width: sel ? 3 : 2.4),
+                              boxShadow: [
+                                BoxShadow(color: Colors.black.withAlpha(140), blurRadius: 10, offset: const Offset(0, 5)),
+                                if (sel) BoxShadow(color: _gold.withAlpha(140), blurRadius: 18, spreadRadius: 2),
+                              ],
+                            ),
+                            child: Center(child: Text(emoji, style: TextStyle(fontSize: sel ? 26 : 19))),
+                          ),
+                          Container(
+                            width: sel ? 6 : 5, height: sel ? 15 : 11,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF9C7E2E),
+                              borderRadius: BorderRadius.circular(3),
+                            ),
+                          ),
                         ]),
                       ),
                     ),
-                  ]),
-                ),
-              );
-            },
+                  );
+                }),
+              ]),
+            ],
           ),
         ),
-      ])),
+
+        // ── TOP: search + categories ──
+        SafeArea(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
+              child: _glass(dark,
+                radius: BorderRadius.circular(26),
+                child: Row(children: [
+                  const SizedBox(width: 14),
+                  Icon(Icons.search_rounded, color: _gold, size: 22),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      controller: _searchCtrl,
+                      focusNode: _searchFocus,
+                      onTap: () => setState(() => _searchOpen = true),
+                      onChanged: _onSearchChanged,
+                      onSubmitted: _runSearch,
+                      textInputAction: TextInputAction.search,
+                      style: TextStyle(color: onGlass, fontSize: 14.5, fontWeight: FontWeight.w500),
+                      decoration: InputDecoration(
+                        hintText: 'Search churches, places…',
+                        hintStyle: TextStyle(color: muted, fontSize: 14),
+                        border: InputBorder.none,
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(vertical: 15),
+                      ),
+                    ),
+                  ),
+                  if (_searchCtrl.text.isNotEmpty)
+                    GestureDetector(
+                      onTap: () { _searchCtrl.clear(); setState(() => _suggestions = []); },
+                      child: Padding(padding: const EdgeInsets.all(6), child: Icon(Icons.close_rounded, color: muted, size: 19)),
+                    ),
+                  const SizedBox(width: 10),
+                ]),
+              ),
+            ),
+            const SizedBox(height: 10),
+            SizedBox(
+              height: 40,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                children: [
+                  ..._categories.map((c) {
+                    final active = c['id'] == _activeCategory;
+                    return Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: GestureDetector(
+                        onTap: () => _loadCategory(c['id']!),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 220),
+                          padding: const EdgeInsets.symmetric(horizontal: 14),
+                          decoration: BoxDecoration(
+                            color: active ? _gold : (dark ? Colors.black : Colors.white).withAlpha(dark ? 150 : 190),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(color: active ? _gold : (dark ? Colors.white24 : Colors.black12), width: 0.7),
+                            boxShadow: [BoxShadow(color: Colors.black.withAlpha(30), blurRadius: 8, offset: const Offset(0, 3))],
+                          ),
+                          child: Row(children: [
+                            Text(c['emoji']!, style: const TextStyle(fontSize: 14)),
+                            const SizedBox(width: 6),
+                            Text(c['label']!, style: TextStyle(
+                              fontSize: 12.5, fontWeight: FontWeight.w700,
+                              color: active ? Colors.white : onGlass,
+                            )),
+                          ]),
+                        ),
+                      ),
+                    );
+                  }),
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: GestureDetector(
+                      onTap: _showNearbyList,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                        decoration: BoxDecoration(
+                          color: (dark ? Colors.black : Colors.white).withAlpha(dark ? 150 : 190),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: dark ? Colors.white24 : Colors.black12, width: 0.7),
+                        ),
+                        child: Row(children: [
+                          Icon(Icons.format_list_bulleted_rounded, size: 15, color: _gold),
+                          const SizedBox(width: 6),
+                          Text('Nearby', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: onGlass)),
+                        ]),
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: GestureDetector(
+                      onTap: _showFavorites,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                        decoration: BoxDecoration(
+                          color: (dark ? Colors.black : Colors.white).withAlpha(dark ? 150 : 190),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: dark ? Colors.white24 : Colors.black12, width: 0.7),
+                        ),
+                        child: Row(children: [
+                          const Text('⭐', style: TextStyle(fontSize: 14)),
+                          const SizedBox(width: 6),
+                          Text('Saved', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: onGlass)),
+                        ]),
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: GestureDetector(
+                      onTap: _openInGoogleMaps,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(colors: [Color(0xFF4285F4), Color(0xFF2E7CF6)]),
+                          borderRadius: BorderRadius.circular(20),
+                          boxShadow: [BoxShadow(color: const Color(0xFF2E7CF6).withAlpha(90), blurRadius: 10, offset: const Offset(0, 3))],
+                        ),
+                        child: const Row(children: [
+                          Icon(Icons.map_rounded, size: 15, color: Colors.white),
+                          SizedBox(width: 6),
+                          Text('Open in Google Maps', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Colors.white)),
+                        ]),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // Suggestions / recents panel
+            if (_searchOpen && (_suggestions.isNotEmpty || (_recents.isNotEmpty && _searchCtrl.text.isEmpty)))
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
+                child: _glass(dark,
+                  radius: BorderRadius.circular(20),
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    if (_suggestions.isEmpty) ...[
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                        child: Row(children: [
+                          Icon(Icons.history_rounded, size: 15, color: muted),
+                          const SizedBox(width: 8),
+                          Text('RECENT', style: TextStyle(fontSize: 10, letterSpacing: 2, fontWeight: FontWeight.w800, color: muted)),
+                        ]),
+                      ),
+                      ..._recents.take(5).map((r) => InkWell(
+                        onTap: () { _searchCtrl.text = r; _runSearch(r); },
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+                          child: Row(children: [
+                            Icon(Icons.north_west_rounded, size: 15, color: muted),
+                            const SizedBox(width: 12),
+                            Expanded(child: Text(r, style: TextStyle(color: onGlass, fontSize: 13.5))),
+                          ]),
+                        ),
+                      )),
+                    ] else
+                      ..._suggestions.map((s) => InkWell(
+                        onTap: () {
+                          _searchCtrl.text = s['name'] as String;
+                          setState(() { _places = [s]; _suggestions = []; _searchOpen = false; });
+                          _searchFocus.unfocus();
+                          _saveRecent(s['name'] as String);
+                          _selectPlace(s);
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                          child: Row(children: [
+                            Container(
+                              width: 34, height: 34,
+                              decoration: BoxDecoration(color: _gold.withAlpha(40), borderRadius: BorderRadius.circular(10)),
+                              child: Icon(Icons.place_rounded, color: _gold, size: 18),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                              Text(s['name'] as String, maxLines: 1, overflow: TextOverflow.ellipsis,
+                                style: TextStyle(color: onGlass, fontSize: 13.5, fontWeight: FontWeight.w600)),
+                              if ((s['sub'] as String).isNotEmpty)
+                                Text(s['sub'] as String, maxLines: 1, overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(color: muted, fontSize: 11.5)),
+                            ])),
+                            if (s['dist'] != null)
+                              Text('${(s['dist'] as double).toStringAsFixed(1)} km',
+                                style: TextStyle(color: _gold, fontSize: 11.5, fontWeight: FontWeight.w700)),
+                          ]),
+                        ),
+                      )),
+                    const SizedBox(height: 6),
+                  ]),
+                ),
+              ),
+          ]),
+        ),
+
+        // ── RIGHT controls ──
+        Positioned(
+          right: 12,
+          top: MediaQuery.of(context).padding.top + 116,
+          child: Column(children: [
+            if (_rotation.abs() > 2) ...[
+              _fab(dark, onTap: _resetNorth, child: Transform.rotate(
+                angle: -_rotation * math.pi / 180,
+                child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                  Text('N', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900, color: const Color(0xFFD64541))),
+                  Icon(Icons.navigation_rounded, size: 14, color: onGlass),
+                ]),
+              )),
+              const SizedBox(height: 10),
+            ],
+            _fab(dark, onTap: _showLayers, child: Icon(Icons.layers_rounded, color: onGlass, size: 21)),
+            const SizedBox(height: 10),
+            _fab(dark, onTap: () {
+              if (_lat != null) { _flyTo(LatLng(_lat!, _lng!), 15.2); } else { _initLocation(); }
+            }, child: Icon(Icons.my_location_rounded, color: _gold, size: 21)),
+            const SizedBox(height: 10),
+            _fab(dark, onTap: () => _flyTo(_center, math.min(19, _zoom + 1)),
+              child: Icon(Icons.add_rounded, color: onGlass, size: 23)),
+            const SizedBox(height: 10),
+            _fab(dark, onTap: () => _flyTo(_center, math.max(3, _zoom - 1)),
+              child: Icon(Icons.remove_rounded, color: onGlass, size: 23)),
+          ]),
+        ),
+
+        // ── Scale + attribution ──
+        Positioned(
+          left: 14,
+          bottom: (_sel != null ? 196 : 22),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: (dark ? Colors.black : Colors.white).withAlpha(140),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                Text(_scaleLabel(), style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w700, color: onGlass)),
+                const SizedBox(height: 2),
+                Container(width: _scaleWidth(), height: 2.5,
+                  decoration: BoxDecoration(color: onGlass, borderRadius: BorderRadius.circular(2))),
+              ]),
+            ),
+            const SizedBox(height: 4),
+            Text('© OpenStreetMap · CARTO · Esri',
+              style: TextStyle(fontSize: 8.5, color: (dark ? Colors.white : Colors.black).withAlpha(110))),
+          ]),
+        ),
+
+        // ── Busy indicator ──
+        if (_busy)
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 118,
+            left: 0, right: 0,
+            child: Center(child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              decoration: BoxDecoration(
+                color: (dark ? Colors.black : Colors.white).withAlpha(200),
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [BoxShadow(color: Colors.black.withAlpha(40), blurRadius: 10)],
+              ),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: _gold)),
+                const SizedBox(width: 10),
+                Text('Finding places…', style: TextStyle(fontSize: 12, color: onGlass, fontWeight: FontWeight.w600)),
+              ]),
+            )),
+          ),
+
+        // ── Locating pill (non-blocking) ──
+        if (_locating)
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 160,
+            left: 0, right: 0,
+            child: IgnorePointer(child: Center(child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              decoration: BoxDecoration(
+                color: (dark ? Colors.black : Colors.white).withAlpha(210),
+                borderRadius: BorderRadius.circular(22),
+                boxShadow: [BoxShadow(color: Colors.black.withAlpha(50), blurRadius: 12)],
+              ),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                const SizedBox(width: 15, height: 15, child: CircularProgressIndicator(strokeWidth: 2, color: _gold)),
+                const SizedBox(width: 10),
+                Text('Finding you…', style: TextStyle(color: onGlass, fontWeight: FontWeight.w600, fontSize: 12.5)),
+              ]),
+            ))),
+          ),
+
+        // ── Error toast ──
+        if (_error.isNotEmpty && !_locating)
+          Positioned(
+            left: 14, right: 14, bottom: 30,
+            child: _glass(dark,
+              radius: BorderRadius.circular(18),
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Row(children: [
+                  Icon(Icons.location_off_rounded, color: const Color(0xFFD64541), size: 22),
+                  const SizedBox(width: 12),
+                  Expanded(child: Text(_error, style: TextStyle(color: onGlass, fontSize: 13))),
+                  GestureDetector(
+                    onTap: () async {
+                      if (_locFix == 1) {
+                        await Geolocator.openLocationSettings();
+                      } else if (_locFix == 2) {
+                        await Geolocator.openAppSettings();
+                      }
+                      _initLocation();
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                      decoration: BoxDecoration(color: _gold, borderRadius: BorderRadius.circular(12)),
+                      child: Text(_locFix == 0 ? 'Retry' : 'Open Settings',
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 12)),
+                    ),
+                  ),
+                ]),
+              ),
+            ),
+          ),
+
+        // ── Place detail sheet ──
+        AnimatedPositioned(
+          duration: const Duration(milliseconds: 320),
+          curve: Curves.easeOutCubic,
+          left: 12, right: 12,
+          bottom: _sel != null ? 14 : -260,
+          child: _sel == null ? const SizedBox() : _glass(dark,
+            radius: BorderRadius.circular(24),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
+              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Center(child: Container(width: 38, height: 4,
+                  decoration: BoxDecoration(color: muted.withAlpha(90), borderRadius: BorderRadius.circular(3)))),
+                const SizedBox(height: 10),
+                Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Container(
+                    width: 50, height: 50,
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(colors: [Color(0xFFE3C878), _gold]),
+                      borderRadius: BorderRadius.circular(15),
+                      boxShadow: [BoxShadow(color: _gold.withAlpha(90), blurRadius: 12, offset: const Offset(0, 4))],
+                    ),
+                    child: Center(child: Text(
+                      _categories.firstWhere((c) => c['id'] == _activeCategory, orElse: () => _categories.first)['emoji']!,
+                      style: const TextStyle(fontSize: 25))),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(_sel!['name'] as String, maxLines: 2, overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: onGlass, height: 1.2)),
+                    const SizedBox(height: 3),
+                    if ((_sel!['sub'] as String? ?? '').isNotEmpty)
+                      Text(_sel!['sub'] as String, maxLines: 1, overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 11.5, color: muted)),
+                    const SizedBox(height: 5),
+                    Row(children: [
+                      if (_sel!['rating'] != null) ...[
+                        Icon(Icons.star_rounded, size: 15, color: const Color(0xFFF2B01E)),
+                        const SizedBox(width: 3),
+                        Text((_sel!['rating'] as double).toStringAsFixed(1),
+                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: onGlass)),
+                        if (_sel!['ratings'] != null)
+                          Text(' (${_sel!['ratings']})', style: TextStyle(fontSize: 11, color: muted)),
+                        const SizedBox(width: 10),
+                      ],
+                      if (_sel!['dist'] != null)
+                        Text('${(_sel!['dist'] as double).toStringAsFixed(1)} km',
+                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _gold)),
+                      if (_sel!['open'] == true) ...[
+                        const SizedBox(width: 10),
+                        Text('Open', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: const Color(0xFF3CA55C))),
+                      ] else if (_sel!['open'] == false) ...[
+                        const SizedBox(width: 10),
+                        Text('Closed', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: const Color(0xFFD64541))),
+                      ],
+                    ]),
+                  ])),
+                  GestureDetector(
+                    onTap: () => _toggleFav(_sel!),
+                    child: Container(
+                      width: 40, height: 40,
+                      decoration: BoxDecoration(
+                        color: _isFav(_sel!) ? _gold.withAlpha(50) : muted.withAlpha(25),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        _isFav(_sel!) ? Icons.star_rounded : Icons.star_outline_rounded,
+                        color: _isFav(_sel!) ? _gold : muted, size: 22),
+                    ),
+                  ),
+                ]),
+                if (_sel!['dist'] != null) ...[
+                  const SizedBox(height: 8),
+                  Text(_eta(_sel!), style: TextStyle(fontSize: 11.5, color: muted, fontWeight: FontWeight.w600)),
+                ],
+                if (_routePoints.isNotEmpty && _routeDistanceKm != null) ...[
+                  const SizedBox(height: 8),
+                  Row(children: [
+                    Icon(Icons.route_rounded, size: 14, color: _gold),
+                    const SizedBox(width: 5),
+                    Text('${_routeDistanceKm!.toStringAsFixed(1)} km on the map · ~$_routeDurationMin min',
+                      style: TextStyle(fontSize: 11.5, color: _gold, fontWeight: FontWeight.w700)),
+                  ]),
+                ],
+                if (_routeError != null) ...[
+                  const SizedBox(height: 8),
+                  Text(_routeError!, style: const TextStyle(fontSize: 11.5, color: Color(0xFFD64541), fontWeight: FontWeight.w600)),
+                ],
+                const SizedBox(height: 12),
+                Row(children: [
+                  Expanded(flex: 3, child: GestureDetector(
+                    onTap: _routing ? null : () => _routePoints.isNotEmpty ? _clearRoute() : _showRoute(_sel!),
+                    child: Container(
+                      height: 46,
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(colors: [Color(0xFFE3C878), _gold, Color(0xFFA98937)]),
+                        borderRadius: BorderRadius.circular(15),
+                        boxShadow: [BoxShadow(color: _gold.withAlpha(110), blurRadius: 14, offset: const Offset(0, 5))],
+                      ),
+                      child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                        if (_routing) ...[
+                          const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2.2, color: Colors.white)),
+                          const SizedBox(width: 8),
+                          const Text('Finding route…', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 14)),
+                        ] else if (_routePoints.isNotEmpty) ...[
+                          const Icon(Icons.close_rounded, color: Colors.white, size: 20),
+                          const SizedBox(width: 8),
+                          const Text('Clear Route', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 14)),
+                        ] else ...[
+                          const Icon(Icons.route_rounded, color: Colors.white, size: 20),
+                          const SizedBox(width: 8),
+                          const Text('Route', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 14)),
+                        ],
+                      ]),
+                    ),
+                  )),
+                  const SizedBox(width: 10),
+                  GestureDetector(
+                    onTap: () => _openDirections(_sel!),
+                    child: Container(
+                      width: 46, height: 46,
+                      decoration: BoxDecoration(
+                        color: muted.withAlpha(28),
+                        borderRadius: BorderRadius.circular(15),
+                        border: Border.all(color: muted.withAlpha(60), width: 0.8),
+                      ),
+                      child: Icon(Icons.map_outlined, color: onGlass, size: 19),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(flex: 2, child: GestureDetector(
+                    onTap: () => _sharePlace(_sel!),
+                    child: Container(
+                      height: 46,
+                      decoration: BoxDecoration(
+                        color: muted.withAlpha(28),
+                        borderRadius: BorderRadius.circular(15),
+                        border: Border.all(color: muted.withAlpha(60), width: 0.8),
+                      ),
+                      child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                        Icon(Icons.ios_share_rounded, color: onGlass, size: 17),
+                        const SizedBox(width: 7),
+                        Text('Share', style: TextStyle(color: onGlass, fontWeight: FontWeight.w700, fontSize: 13.5)),
+                      ]),
+                    ),
+                  )),
+                ]),
+              ]),
+            ),
+          ),
+        ),
+      ]),
     );
   }
-}
 
-
-class _ChurchPinPainter extends CustomPainter {
-  final bool selected;
-  final Color gold;
-  const _ChurchPinPainter({required this.selected, required this.gold});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final double r = size.width / 2;
-    final double cy = r; // circle center y
-    final Paint fillPaint = Paint()..color = gold..style = PaintingStyle.fill;
-    final Paint borderPaint = Paint()..color = Colors.white..style = PaintingStyle.stroke..strokeWidth = 3;
-    final Paint shadowPaint = Paint()..color = Colors.black.withAlpha(80)..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
-
-    // Shadow
-    canvas.drawCircle(Offset(r, cy + 3), r - 2, shadowPaint);
-    // Gold circle
-    canvas.drawCircle(Offset(r, cy), r - 2, fillPaint);
-    // White border
-    canvas.drawCircle(Offset(r, cy), r - 2, borderPaint);
-
-    // Pin tail
-    final tailPaint = Paint()..color = gold..style = PaintingStyle.fill;
-    final tailPath = ui.Path();
-    final double tailX = r;
-    final double tailTop = cy + r - 4;
-    final double tailBot = size.height - 2;
-    tailPath.moveTo(tailX - 5, tailTop);
-    tailPath.lineTo(tailX + 5, tailTop);
-    tailPath.lineTo(tailX, tailBot);
-    tailPath.close();
-    canvas.drawPath(tailPath, tailPaint);
-
-    // Cross icon drawn manually
-    final crossPaint = Paint()..color = Colors.white..style = PaintingStyle.stroke..strokeWidth = selected ? 4 : 3..strokeCap = StrokeCap.round;
-    final double cs = r * 0.55;
-    // Vertical bar
-    canvas.drawLine(Offset(r, cy - cs), Offset(r, cy + cs * 0.6), crossPaint);
-    // Horizontal bar (upper third)
-    canvas.drawLine(Offset(r - cs * 0.7, cy - cs * 0.2), Offset(r + cs * 0.7, cy - cs * 0.2), crossPaint);
-    // Church roof
-    final roofPaint = Paint()..color = Colors.white..style = PaintingStyle.stroke..strokeWidth = selected ? 3 : 2..strokeCap = StrokeCap.round;
-    final roofPath = ui.Path();
-    roofPath.moveTo(r - cs * 0.7, cy + cs * 0.6);
-    roofPath.lineTo(r, cy - cs * 0.6);
-    roofPath.lineTo(r + cs * 0.7, cy + cs * 0.6);
-    canvas.drawPath(roofPath, roofPaint);
+  // ── Glass helpers ──
+  Widget _glass(bool dark, {required Widget child, BorderRadius? radius}) {
+    return ClipRRect(
+      borderRadius: radius ?? BorderRadius.circular(22),
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+        child: Container(
+          decoration: BoxDecoration(
+            color: (dark ? const Color(0xFF17130C) : Colors.white).withAlpha(dark ? 165 : 185),
+            borderRadius: radius ?? BorderRadius.circular(22),
+            border: Border.all(color: (dark ? Colors.white : Colors.black).withAlpha(dark ? 30 : 18), width: 0.8),
+            boxShadow: [BoxShadow(color: Colors.black.withAlpha(dark ? 90 : 35), blurRadius: 22, offset: const Offset(0, 8))],
+          ),
+          child: child,
+        ),
+      ),
+    );
   }
 
-  @override
-  bool shouldRepaint(_ChurchPinPainter old) => old.selected != selected;
+  Widget _fab(bool dark, {required VoidCallback onTap, required Widget child}) {
+    return GestureDetector(
+      onTap: onTap,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: BackdropFilter(
+          filter: ui.ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+          child: Container(
+            width: 46, height: 46,
+            decoration: BoxDecoration(
+              color: (dark ? const Color(0xFF17130C) : Colors.white).withAlpha(dark ? 170 : 195),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: (dark ? Colors.white : Colors.black).withAlpha(dark ? 30 : 16), width: 0.8),
+              boxShadow: [BoxShadow(color: Colors.black.withAlpha(dark ? 100 : 40), blurRadius: 14, offset: const Offset(0, 5))],
+            ),
+            child: Center(child: child),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── Sheets ──
+  void _showLayers() {
+    final dark = widget.isDark;
+    final onGlass = dark ? Colors.white : const Color(0xFF15130E);
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.all(12),
+        child: _glass(dark,
+          radius: BorderRadius.circular(26),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 14, 18, 22),
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Center(child: Container(width: 38, height: 4,
+                decoration: BoxDecoration(color: onGlass.withAlpha(60), borderRadius: BorderRadius.circular(3)))),
+              const SizedBox(height: 14),
+              Text('Map style', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: onGlass)),
+              const SizedBox(height: 14),
+              Row(children: List.generate(4, (i) {
+                const names = ['Standard', 'Satellite', 'Hybrid', 'Terrain'];
+                const icons = [Icons.map_rounded, Icons.satellite_alt_rounded, Icons.layers_rounded, Icons.terrain_rounded];
+                final active = _style == i;
+                return Expanded(child: Padding(
+                  padding: EdgeInsets.only(right: i < 3 ? 10 : 0),
+                  child: GestureDetector(
+                    onTap: () { setState(() => _style = i); Navigator.pop(ctx); },
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      height: 76,
+                      decoration: BoxDecoration(
+                        color: active ? _gold : onGlass.withAlpha(14),
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(color: active ? _gold : onGlass.withAlpha(35), width: active ? 1.6 : 0.7),
+                      ),
+                      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                        Icon(icons[i], size: 24, color: active ? Colors.white : onGlass),
+                        const SizedBox(height: 6),
+                        Text(names[i], style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700,
+                          color: active ? Colors.white : onGlass)),
+                      ]),
+                    ),
+                  ),
+                ));
+              })),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+
+
+  void _showFavorites() {
+    final dark = widget.isDark;
+    final onGlass = dark ? Colors.white : const Color(0xFF15130E);
+    final muted = dark ? Colors.white60 : Colors.black54;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.all(12),
+        child: _glass(dark,
+          radius: BorderRadius.circular(26),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 14, 18, 22),
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Center(child: Container(width: 38, height: 4,
+                decoration: BoxDecoration(color: onGlass.withAlpha(60), borderRadius: BorderRadius.circular(3)))),
+              const SizedBox(height: 14),
+              Row(children: [
+                const Text('⭐', style: TextStyle(fontSize: 18)),
+                const SizedBox(width: 8),
+                Text('Saved places', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: onGlass)),
+              ]),
+              const SizedBox(height: 10),
+              if (_favorites.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 20),
+                  child: Center(child: Text('Tap ⭐ on any place to save it here.',
+                    style: TextStyle(color: muted, fontSize: 13))),
+                )
+              else
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 300),
+                  child: ListView(shrinkWrap: true, children: _favorites.map((f) => InkWell(
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      if (!_places.any((p) => p['place_id'] == f['place_id'])) {
+                        setState(() => _places = [f, ..._places]);
+                      }
+                      _selectPlace(f);
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      child: Row(children: [
+                        Container(
+                          width: 38, height: 38,
+                          decoration: BoxDecoration(color: _gold.withAlpha(45), borderRadius: BorderRadius.circular(12)),
+                          child: Icon(Icons.place_rounded, color: _gold, size: 19),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(child: Text(f['name'] as String, maxLines: 1, overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: onGlass, fontSize: 13.5, fontWeight: FontWeight.w600))),
+                        GestureDetector(
+                          onTap: () { _toggleFav(f); Navigator.pop(ctx); _showFavorites(); },
+                          child: Icon(Icons.close_rounded, size: 17, color: muted),
+                        ),
+                      ]),
+                    ),
+                  )).toList()),
+                ),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class SaintStoryScreen extends StatelessWidget {
@@ -5171,22 +6686,10 @@ class _MoreScreenState extends State<MoreScreen> {
   }
 
   Future<void> _logout() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('logged_in', false);
+    await FirebaseAuth.instance.signOut();
     if (!mounted) return;
     Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => SignInScreen(
-        onSaved: (p) async {
-          final prefs2 = await SharedPreferences.getInstance();
-          await prefs2.setString('user_profile', jsonEncode(p.toJson()));
-          if (!mounted) return;
-          Navigator.of(context).pushAndRemoveUntil(
-            MaterialPageRoute(builder: (_) => const YenefsAbatApp()),
-            (route) => false,
-          );
-        },
-        isDark: widget.isDark,
-      )),
+      MaterialPageRoute(builder: (_) => const YenefsAbatApp()),
       (route) => false,
     );
   }
@@ -5270,6 +6773,11 @@ class _MoreScreenState extends State<MoreScreen> {
               Divider(color: c.border, height: 0.5),
             ],
             _actionRow('Log Out', Icons.logout, c, c.red, _logout),
+          ]),
+          _sectionLabel('SPIRITUAL LIFE', c),
+          _settingsCard(c, children: [
+            _actionRow('Prayer Library', Icons.menu_book_outlined, c, c.gold, () => Navigator.push(context, MaterialPageRoute(
+              builder: (_) => PrayerLibraryScreen(isDark: widget.isDark)))),
           ]),
           _sectionLabel('NOTIFICATIONS', c),
           _settingsCard(c, children: [
@@ -5387,4 +6895,388 @@ class _MoreScreenState extends State<MoreScreen> {
       ])),
     ]),
   );
+}
+
+// ═══════════════════════════════════════════════
+// PRAYER LIBRARY — የጸሎት መጽሐፍ
+// ═══════════════════════════════════════════════
+
+class PrayerItem {
+  final String id;
+  final String titleGeez;
+  final String titleAmharic;
+  final String category; // Daily, Praise, Repentance, Liturgy
+  final String timeOfDay;
+  final String geezText;
+  final String amharicTranslation;
+  const PrayerItem({
+    required this.id,
+    required this.titleGeez,
+    required this.titleAmharic,
+    required this.category,
+    required this.timeOfDay,
+    required this.geezText,
+    required this.amharicTranslation,
+  });
+}
+
+const List<PrayerItem> orthodoxPrayerSource = [
+  PrayerItem(
+    id: 'pr-1',
+    titleGeez: 'በስመ አብ ወወልድ ወመንፈስ ቅዱስ',
+    titleAmharic: 'አባታችን ሆይ (የዘወትር ጸሎት)',
+    category: 'Daily',
+    timeOfDay: 'Morning / Evening',
+    geezText: 'አቡነ ዘበሰማያት ይትቀደስ ስምከ፤ ትምጻእ መንግሥትከ፤ ወይኩን ፈቃድከ በከመ በሰማይ ከማሁ በምድር፤ ሲሳየነ ዘለለ ዕለትነ ሀበነ ዮም፤ ኅድግ ለነ አበሳነ ወጌጋየነ ከመ ንሕነኒ ንኅድግ ለዘአበሰ ለነ፤ ኢታብኦነ እግዚኦ ውስተ መንሱት፤ አላ አድኅነነ ወባልሐነ እምኩሉ እኩይ፤ እስመ ዚአከ ይእቲ መንግሥት ኃይል ወስብሐት ለዓለመ ዓለም አሜን።',
+    amharicTranslation: 'በሰማያት የምትኖር አባታችን ሆይ፤ ስምህ ይቀደስ፤ መንግሥትህ ትምጣ፤ ፈቃድህ በሰማይ እንደ ሆነች እንዲሁ በምድር ትሁን፤ የዕለት እንጀራችንን ስጠን ዛሬ፤ በደላችንንም ይቅር በለን፤ እኛም የበደሉንን ይቅር እንደምንል፤ አቤቱ ወደ ፈተና አታግባን፤ ከክፉ ሁሉ አድነን እንጂ፤ መንግሥት ያንተ ናትና ኃይልም ስብሐትም ለዘለዓለሙ አሜን።',
+  ),
+  PrayerItem(
+    id: 'pr-2',
+    titleGeez: 'ሰላም ለኪ ማርያም',
+    titleAmharic: 'እመቤታችን ማርያም ሆይ ሰላምታ ይገባሻል',
+    category: 'Praise',
+    timeOfDay: 'Daily',
+    geezText: 'በሰላመ ቅዱስ ገብርኤል መልአክ፡ እግዝእትየ ማርያም ሰላም ለኪ፤ ድንግል ብኅሊናኪ ወድንግል በሥጋኪ፤ እመ እግዚአብሔር ጸባኦት ሰላም ለኪ፤ ቡሩክት አንቲ እምአንስት ወቡሩክ ፍሬ ከርሥኪ፤ ተፈሥሒ ፍሥሕት ኦ ምልእተ ጸጋ እግዚአብሔር ምስሌኪ፤ ሰአሊ ወጸልዪ ምሕረተ በኀበ ፍቁር ወልድኪ ኢየሱስ ክርስቶስ ከመ ይሥረይ ለነ ኃጣውኢነ አሜን።',
+    amharicTranslation: 'እመቤታችን ቅድስት ድንግል ማርያም ሆይ፤ በቅዱስ ገብርኤል መልአክ ሰላምታ ሰላም እንልሻለን፤ በሐሳብሽ ድንግል ነሽ፤ በሥጋሽም ድንግል ነሽ፤ የሠራዊት ጌታ የእግዚአብሔር እናት ሆይ ሰላምታ ይገባሻል፤ ከሴቶች ሁሉ ተለይተሽ የተባረክሽ ነሽ፤ የሆድሽም ፍሬ የተባረከ ነው፤ ጸጋን የተሞላሽ ሆይ ደስ ይበልሽ እግዚአብሔር ከአንቺ ጋር ነውና፤ ከፍቅር ልጅሽ ከጌታችን ከኢየሱስ ክርስቶስ ዘንድ ይቅርታንና ምሕረትን ለምኚልን ኃጢአታችንንም ይሠረይልን ዘንድ ለዘለዓለሙ አሜን።',
+  ),
+  PrayerItem(
+    id: 'pr-3',
+    titleGeez: 'ውዳሴ ማርያም (ዘሰኞ)',
+    titleAmharic: 'የሰኞ ውዳሴ ማርያም',
+    category: 'Daily',
+    timeOfDay: 'Monday',
+    geezText: 'ፈቀደ እግዚእ ያግዕዞ ለአዳም ኅዙነ ወትኩዘ ልብ፤ ወያግብኦ ውስተ ቀዲሙ ብሔር፤ ሰአሊ ለነ ቅድስት...',
+    amharicTranslation: 'ያዘነና የተቀዘነ አዳምን ነጻ ያወጣው ዘንድ፥ ወደ ቀደመ ቦታውም ይመልሰው ዘንድ ጌታ ፈቀደ። ቅድስት ሆይ ለምኚልን...',
+  ),
+];
+
+class PrayerLibraryScreen extends StatefulWidget {
+  final bool isDark;
+  const PrayerLibraryScreen({super.key, required this.isDark});
+  @override
+  State<PrayerLibraryScreen> createState() => _PrayerLibraryScreenState();
+}
+
+class _PrayerLibraryScreenState extends State<PrayerLibraryScreen> {
+  final _searchCtrl = TextEditingController();
+  String _searchQuery = '';
+  String _selectedCategory = 'All';
+  bool _bookmarksOnly = false;
+  Set<String> _bookmarks = {};
+  bool _loaded = false;
+
+  static const _categories = ['All', 'Daily', 'Praise', 'Repentance', 'Liturgy'];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadBookmarks();
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadBookmarks() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getStringList('prayer_bookmarks');
+    setState(() {
+      _bookmarks = saved != null ? saved.toSet() : {'pr-1', 'pr-3'};
+      _loaded = true;
+    });
+  }
+
+  Future<void> _toggleBookmark(String id) async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      if (_bookmarks.contains(id)) {
+        _bookmarks.remove(id);
+      } else {
+        _bookmarks.add(id);
+      }
+    });
+    await prefs.setStringList('prayer_bookmarks', _bookmarks.toList());
+  }
+
+  List<PrayerItem> get _filtered => orthodoxPrayerSource.where((p) {
+    final q = _searchQuery.trim();
+    final matchesSearch = q.isEmpty ||
+        p.titleGeez.contains(q) || p.titleAmharic.contains(q) || p.amharicTranslation.contains(q);
+    final matchesCategory = _selectedCategory == 'All' || p.category == _selectedCategory;
+    final matchesTab = !_bookmarksOnly || _bookmarks.contains(p.id);
+    return matchesSearch && matchesCategory && matchesTab;
+  }).toList();
+
+  void _resetFilters() => setState(() {
+    _searchCtrl.clear();
+    _searchQuery = '';
+    _selectedCategory = 'All';
+    _bookmarksOnly = false;
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppColors(widget.isDark);
+    final results = _filtered;
+    return Scaffold(
+      backgroundColor: c.bg,
+      body: SafeArea(child: Column(children: [
+        Container(
+          color: c.hero, padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              GestureDetector(onTap: () => Navigator.pop(context), child: Icon(Icons.arrow_back_ios, color: c.gold, size: 20)),
+              const SizedBox(width: 10),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('የጸሎት መጽሐፍ', style: TextStyle(fontSize: 18, color: c.text, fontWeight: FontWeight.w800)),
+                Text('Orthodox Tewahedo Prayer Library', style: TextStyle(fontSize: 11, color: c.muted, fontStyle: FontStyle.italic)),
+              ])),
+              Icon(Icons.auto_awesome, color: c.gold, size: 20),
+            ]),
+            const SizedBox(height: 14),
+            TextField(
+              controller: _searchCtrl,
+              onChanged: (v) => setState(() => _searchQuery = v),
+              style: TextStyle(color: c.text, fontSize: 14),
+              decoration: InputDecoration(
+                hintText: 'ጸሎት ይፈልጉ... (Search prayers)',
+                hintStyle: TextStyle(color: c.muted, fontSize: 13),
+                prefixIcon: Icon(Icons.search, color: c.muted, size: 20),
+                filled: true, fillColor: c.card,
+                contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: c.border, width: 0.5)),
+                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: c.border, width: 0.5)),
+                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: c.gold, width: 1.5)),
+              ),
+            ),
+            const SizedBox(height: 10),
+            Row(children: [
+              Expanded(child: _tabBtn('ሁሉንም (All)', !_bookmarksOnly, c, () => setState(() => _bookmarksOnly = false))),
+              const SizedBox(width: 8),
+              Expanded(child: _tabBtn('የተመረጡ (Saved)', _bookmarksOnly, c, () => setState(() => _bookmarksOnly = true), icon: Icons.bookmark)),
+            ]),
+            const SizedBox(height: 10),
+            SizedBox(
+              height: 32,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: _categories.length,
+                separatorBuilder: (_, _) => const SizedBox(width: 8),
+                itemBuilder: (_, i) {
+                  final cat = _categories[i];
+                  final active = _selectedCategory == cat;
+                  return GestureDetector(
+                    onTap: () => setState(() => _selectedCategory = cat),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: active ? c.gold : c.card,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: active ? c.gold : c.border, width: 0.5),
+                      ),
+                      child: Text(cat, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
+                        color: active ? (widget.isDark ? const Color(0xFF0F0505) : Colors.white) : c.muted)),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ]),
+        ),
+        Divider(color: c.border, height: 0.5),
+        Expanded(
+          child: !_loaded ? Center(child: CircularProgressIndicator(color: c.gold))
+            : results.isEmpty ? _emptyState(c) : ListView.builder(
+              padding: const EdgeInsets.all(14),
+              itemCount: results.length,
+              itemBuilder: (_, i) => _prayerCard(results[i], c),
+            ),
+        ),
+      ])),
+    );
+  }
+
+  Widget _tabBtn(String label, bool active, AppColors c, VoidCallback onTap, {IconData? icon}) => GestureDetector(
+    onTap: onTap,
+    child: Container(
+      padding: const EdgeInsets.symmetric(vertical: 9),
+      decoration: BoxDecoration(
+        color: active ? c.gold : c.card,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: active ? c.gold : c.border, width: 0.5),
+      ),
+      child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+        if (icon != null) ...[Icon(icon, size: 13, color: active ? (widget.isDark ? const Color(0xFF0F0505) : Colors.white) : c.muted), const SizedBox(width: 5)],
+        Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
+          color: active ? (widget.isDark ? const Color(0xFF0F0505) : Colors.white) : c.muted)),
+      ]),
+    ),
+  );
+
+  Widget _prayerCard(PrayerItem p, AppColors c) {
+    final bookmarked = _bookmarks.contains(p.id);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Material(
+        color: c.card,
+        borderRadius: BorderRadius.circular(16),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: () => Navigator.push(context, MaterialPageRoute(
+            builder: (_) => PrayerDetailScreen(isDark: widget.isDark, prayer: p, initiallyBookmarked: bookmarked, onToggleBookmark: () => _toggleBookmark(p.id)),
+          )),
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: c.border, width: 0.5),
+              boxShadow: [BoxShadow(color: Colors.black.withAlpha(10), blurRadius: 8, offset: const Offset(0, 2))],
+            ),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(color: c.goldBg, borderRadius: BorderRadius.circular(6)),
+                    child: Text(p.category, style: TextStyle(fontSize: 10, color: c.gold, fontWeight: FontWeight.w700)),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(p.titleAmharic, style: TextStyle(fontSize: 15, color: c.text, fontWeight: FontWeight.w800)),
+                  Text(p.titleGeez, style: TextStyle(fontSize: 12, color: c.muted, fontStyle: FontStyle.italic)),
+                ])),
+                GestureDetector(
+                  onTap: () => _toggleBookmark(p.id),
+                  child: Icon(bookmarked ? Icons.bookmark : Icons.bookmark_border, color: bookmarked ? c.gold : c.muted, size: 20),
+                ),
+              ]),
+              const SizedBox(height: 10),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(color: c.goldBg.withAlpha(120), borderRadius: BorderRadius.circular(10)),
+                child: Text(p.amharicTranslation, maxLines: 3, overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 12, color: c.text, height: 1.6)),
+              ),
+              const SizedBox(height: 8),
+              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                Row(children: [
+                  Icon(Icons.access_time, size: 13, color: c.gold.withAlpha(160)),
+                  const SizedBox(width: 4),
+                  Text(p.timeOfDay, style: TextStyle(fontSize: 11, color: c.muted)),
+                ]),
+                Row(children: [
+                  Text('ንበብ (Read)', style: TextStyle(fontSize: 11, color: c.gold, fontWeight: FontWeight.w700)),
+                  Icon(Icons.chevron_right, size: 16, color: c.gold),
+                ]),
+              ]),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _emptyState(AppColors c) => Center(
+    child: Padding(
+      padding: const EdgeInsets.all(32),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Container(
+          width: 72, height: 72,
+          decoration: BoxDecoration(color: c.goldBg, shape: BoxShape.circle, border: Border.all(color: c.gold, width: 0.5)),
+          child: Center(child: Icon(Icons.menu_book_outlined, color: c.gold, size: 32)),
+        ),
+        const SizedBox(height: 16),
+        Text('ምንም ጸሎት አልተገኘም', style: TextStyle(fontSize: 16, color: c.text, fontWeight: FontWeight.w800)),
+        const SizedBox(height: 6),
+        Text('No prayers match your selected filters or search terms at this time.',
+          textAlign: TextAlign.center, style: TextStyle(fontSize: 12, color: c.muted, height: 1.5)),
+        const SizedBox(height: 20),
+        GestureDetector(
+          onTap: _resetFilters,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+            decoration: BoxDecoration(color: c.gold, borderRadius: BorderRadius.circular(12)),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(Icons.refresh, size: 15, color: widget.isDark ? const Color(0xFF0F0505) : Colors.white),
+              const SizedBox(width: 6),
+              Text('ሁሉንም አሳይ (Reset View)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: widget.isDark ? const Color(0xFF0F0505) : Colors.white)),
+            ]),
+          ),
+        ),
+      ]),
+    ),
+  );
+}
+
+class PrayerDetailScreen extends StatefulWidget {
+  final bool isDark;
+  final PrayerItem prayer;
+  final bool initiallyBookmarked;
+  final VoidCallback onToggleBookmark;
+  const PrayerDetailScreen({super.key, required this.isDark, required this.prayer, required this.initiallyBookmarked, required this.onToggleBookmark});
+  @override
+  State<PrayerDetailScreen> createState() => _PrayerDetailScreenState();
+}
+
+class _PrayerDetailScreenState extends State<PrayerDetailScreen> {
+  late bool _bookmarked = widget.initiallyBookmarked;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppColors(widget.isDark);
+    final p = widget.prayer;
+    return Scaffold(
+      backgroundColor: c.bg,
+      body: SafeArea(child: Column(children: [
+        Container(
+          color: c.hero, padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+          child: Row(children: [
+            GestureDetector(onTap: () => Navigator.pop(context), child: Icon(Icons.arrow_back_ios, color: c.gold, size: 20)),
+            const SizedBox(width: 10),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(p.titleAmharic, style: TextStyle(fontSize: 15, color: c.text, fontWeight: FontWeight.w800), maxLines: 1, overflow: TextOverflow.ellipsis),
+              Text(p.category, style: TextStyle(fontSize: 11, color: c.muted)),
+            ])),
+            GestureDetector(
+              onTap: () { widget.onToggleBookmark(); setState(() => _bookmarked = !_bookmarked); },
+              child: Icon(_bookmarked ? Icons.bookmark : Icons.bookmark_border, color: c.gold, size: 22),
+            ),
+          ]),
+        ),
+        Divider(color: c.border, height: 0.5),
+        Expanded(child: SingleChildScrollView(
+          padding: const EdgeInsets.all(18),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(p.titleGeez, style: TextStyle(fontSize: 18, color: c.gold, fontWeight: FontWeight.w800, height: 1.5)),
+            const SizedBox(height: 4),
+            Row(children: [
+              Icon(Icons.access_time, size: 13, color: c.muted),
+              const SizedBox(width: 4),
+              Text(p.timeOfDay, style: TextStyle(fontSize: 12, color: c.muted)),
+            ]),
+            const SizedBox(height: 20),
+            Text('ግዕዝ (Ge\'ez)', style: TextStyle(fontSize: 11, color: c.gold, letterSpacing: 1, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 8),
+            Container(
+              width: double.infinity, padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(color: c.card, borderRadius: BorderRadius.circular(14), border: Border.all(color: c.border, width: 0.5)),
+              child: Text(p.geezText, style: TextStyle(fontSize: 15, color: c.text, height: 1.9)),
+            ),
+            const SizedBox(height: 20),
+            Text('አማርኛ (Amharic)', style: TextStyle(fontSize: 11, color: c.gold, letterSpacing: 1, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 8),
+            Container(
+              width: double.infinity, padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(color: c.goldBg, borderRadius: BorderRadius.circular(14), border: Border.all(color: c.gold.withAlpha(70), width: 0.5)),
+              child: Text(p.amharicTranslation, style: TextStyle(fontSize: 14, color: c.text, height: 1.9)),
+            ),
+            const SizedBox(height: 30),
+          ]),
+        )),
+      ])),
+    );
+  }
 }
