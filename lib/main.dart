@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderRepaintBoundary;
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -9,6 +10,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:share_plus/share_plus.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
@@ -211,6 +213,118 @@ class EthiopianDate {
   bool get isLeapYear => EthiopianCalendar.isLeapYear(year);
   int get dayOfYear => EthiopianCalendar.dayOfYear(day, month, year);
   int get totalDaysInYear => EthiopianCalendar.daysInYear(year);
+}
+
+// ═══════════════════════════════════════════════
+// FASTING CALENDAR (EOTC)
+// ═══════════════════════════════════════════════
+//
+// Computes Fasika (Orthodox/Julian-reckoned Easter) and the standard
+// EOTC fasting periods derived from it, plus the two fixed-date fasts
+// and the weekly Wednesday/Friday fast. This is a standard calendrical
+// algorithm (Meeus' Julian Easter, converted to the Gregorian calendar
+// for display) applied to well-documented EOTC fasting rules — not
+// authoritative liturgical guidance, and it simplifies a couple of
+// lesser-known exception days. Treat it as a solid approximation.
+
+DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
+
+/// Julian-calendar Easter (Meeus' algorithm), converted to the Gregorian
+/// calendar date used for civil reckoning of Fasika.
+DateTime orthodoxEaster(int gregorianYear) {
+  final a = gregorianYear % 4;
+  final b = gregorianYear % 7;
+  final c = gregorianYear % 19;
+  final d = (19 * c + 15) % 30;
+  final e = (2 * a + 4 * b - d + 34) % 7;
+  final month = (d + e + 114) ~/ 31;
+  final day = ((d + e + 114) % 31) + 1;
+  final julianEaster = DateTime(gregorianYear, month, day);
+  return julianEaster.add(Duration(days: _julianToGregorianOffset(gregorianYear)));
+}
+
+int _julianToGregorianOffset(int year) {
+  if (year >= 1900 && year <= 2099) return 13;
+  if (year >= 2100 && year <= 2199) return 14;
+  if (year >= 1800 && year <= 1899) return 12;
+  return 13;
+}
+
+class FastingPeriod {
+  final String nameAmharic;
+  final String nameEnglish;
+  final DateTime start; // inclusive
+  final DateTime end; // inclusive
+  const FastingPeriod({required this.nameAmharic, required this.nameEnglish, required this.start, required this.end});
+  int get totalDays => end.difference(start).inDays + 1;
+  int dayNumber(DateTime d) => _dateOnly(d).difference(start).inDays + 1;
+  bool contains(DateTime d) {
+    final dd = _dateOnly(d);
+    return !dd.isBefore(start) && !dd.isAfter(end);
+  }
+}
+
+/// The named EOTC fasting periods that fall within (or overlap) the
+/// given Gregorian year.
+List<FastingPeriod> fastingPeriodsForYear(int gregorianYear) {
+  final fasika = _dateOnly(orthodoxEaster(gregorianYear));
+
+  final lentStart = fasika.subtract(const Duration(days: 55));
+  final lentEnd = fasika.subtract(const Duration(days: 1));
+  final ninevehStart = lentStart.subtract(const Duration(days: 14));
+  final ninevehEnd = ninevehStart.add(const Duration(days: 2));
+  final apostlesStart = fasika.add(const Duration(days: 50));
+
+  // Advent / ጾመ ነቢያት: Hidar 15 – Tahsas 28 of the Ethiopian year overlapping this Gregorian November.
+  final ethYearAdvent = EthiopianCalendar.fromGregorian(DateTime(gregorianYear, 11, 15)).year;
+  final adventStart = _dateOnly(EthiopianCalendar.toGregorian(15, 3, ethYearAdvent));
+  final adventEnd = _dateOnly(EthiopianCalendar.toGregorian(28, 4, ethYearAdvent));
+
+  // Fast of the Assumption / ጾመ ፍልሰታ: Nehase 1–15.
+  final ethYearFilseta = EthiopianCalendar.fromGregorian(DateTime(gregorianYear, 8, 10)).year;
+  final filsetaStart = _dateOnly(EthiopianCalendar.toGregorian(1, 12, ethYearFilseta));
+  final filsetaEnd = _dateOnly(EthiopianCalendar.toGregorian(15, 12, ethYearFilseta));
+
+  // Apostles' Fast ends Hamle 5 — can be skipped some years if Fasika falls
+  // very late, same as real EOTC practice.
+  final ethYearHawaryat = EthiopianCalendar.fromGregorian(DateTime(gregorianYear, 7, 10)).year;
+  final apostlesEnd = _dateOnly(EthiopianCalendar.toGregorian(5, 11, ethYearHawaryat));
+
+  return [
+    FastingPeriod(nameAmharic: 'ጾመ ነነዌ', nameEnglish: "Nineveh's Fast", start: ninevehStart, end: ninevehEnd),
+    FastingPeriod(nameAmharic: 'ዐቢይ ጾም', nameEnglish: 'Great Lent', start: lentStart, end: lentEnd),
+    if (!apostlesEnd.isBefore(apostlesStart))
+      FastingPeriod(nameAmharic: 'ጾመ ሐዋርያት', nameEnglish: "Apostles' Fast", start: apostlesStart, end: apostlesEnd),
+    FastingPeriod(nameAmharic: 'ጾመ ፍልሰታ', nameEnglish: 'Fast of the Assumption', start: filsetaStart, end: filsetaEnd),
+    FastingPeriod(nameAmharic: 'ጾመ ነቢያት', nameEnglish: "Advent (Prophets' Fast)", start: adventStart, end: adventEnd),
+  ];
+}
+
+/// True on the standard weekly Wed/Fri fast days, excluding the two
+/// well-known no-fast windows: the 50 joyful days from Fasika to
+/// Pentecost, and Nativity–Epiphany (Tahsas 29 – Tir 11).
+bool isWeeklyFastDay(DateTime date) {
+  final wd = date.weekday;
+  if (wd != DateTime.wednesday && wd != DateTime.friday) return false;
+  final d0 = _dateOnly(date);
+  final fasika = _dateOnly(orthodoxEaster(date.year));
+  final pentecost = fasika.add(const Duration(days: 49));
+  if (!d0.isBefore(fasika) && !d0.isAfter(pentecost)) return false;
+  final eth = EthiopianCalendar.fromGregorian(d0);
+  if ((eth.month == 4 && eth.day >= 29) || (eth.month == 5 && eth.day <= 11)) return false;
+  return true;
+}
+
+bool isFastingDay(DateTime date) {
+  if (isWeeklyFastDay(date)) return true;
+  return currentFastingPeriod(date) != null;
+}
+
+FastingPeriod? currentFastingPeriod(DateTime date) {
+  for (final p in fastingPeriodsForYear(date.year)) {
+    if (p.contains(date)) return p;
+  }
+  return null;
 }
 
 // ═══════════════════════════════════════════════
@@ -1313,6 +1427,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
               _label('TODAY\'S SAINT', c), _saintCard(c),
               _label('PRAYER REMINDERS', c), _prayerSection(c),
               _label('CONFESSION', c), _confCard(c),
+              _label('FASTING', c), _fastingCard(c),
               const SizedBox(height: 24),
             ]),
           ),
@@ -1401,11 +1516,12 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           Text('Day ${_today.dayOfYear} of ${_today.totalDaysInYear}',
               style: TextStyle(fontSize: 11, color: c.muted)),
         ]),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(color: c.goldBg, borderRadius: BorderRadius.circular(20), border: Border.all(color: c.gold, width: 0.5)),
-          child: Text('✦ Fasting Day', style: TextStyle(fontSize: 11, color: c.gold, fontWeight: FontWeight.w600)),
-        ),
+        if (isFastingDay(now))
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(color: c.goldBg, borderRadius: BorderRadius.circular(20), border: Border.all(color: c.gold, width: 0.5)),
+            child: Text('✦ Fasting Day', style: TextStyle(fontSize: 11, color: c.gold, fontWeight: FontWeight.w600)),
+          ),
       ]),
     );
   }
@@ -1534,6 +1650,14 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 ),
               ],
             ])),
+            GestureDetector(
+              onTap: () => Navigator.push(context, MaterialPageRoute(
+                builder: (_) => ShareCardScreen(isDark: widget.isDark, initialTab: 1))),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                child: Icon(Icons.ios_share_rounded, color: c.gold, size: 17),
+              ),
+            ),
             Icon(Icons.chevron_right, color: c.muted, size: 20),
           ]),
           if (synaxarium != null) ...[
@@ -1683,6 +1807,46 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           ),
         ),
       ]),
+    );
+  }
+
+  Widget _fastingCard(AppColors c) {
+    final now = DateTime.now();
+    final period = currentFastingPeriod(now);
+    final fasting = isFastingDay(now);
+    return GestureDetector(
+      onTap: () => Navigator.push(context, MaterialPageRoute(
+        builder: (_) => FastingTrackerScreen(isDark: widget.isDark))),
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(14, 0, 14, 0),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: fasting ? c.goldBg : c.card, borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: fasting ? c.gold : c.border, width: fasting ? 1.5 : 0.5),
+          boxShadow: [BoxShadow(color: Colors.black.withAlpha(10), blurRadius: 8, offset: const Offset(0, 2))],
+        ),
+        child: Row(children: [
+          Container(
+            width: 44, height: 44,
+            decoration: BoxDecoration(color: c.card, borderRadius: BorderRadius.circular(14), border: Border.all(color: c.gold, width: 0.5)),
+            child: const Center(child: Text('🕊', style: TextStyle(fontSize: 20))),
+          ),
+          const SizedBox(width: 14),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(
+              period != null ? '${period.nameEnglish} — Day ${period.dayNumber(now)} of ${period.totalDays}'
+                  : (fasting ? 'Fasting Day' : 'Fasting Tracker'),
+              style: TextStyle(fontSize: 14, color: c.text, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              period != null ? period.nameAmharic : (fasting ? 'ጾም ቀን — Wednesday/Friday fast' : 'Track your fasting streak'),
+              style: TextStyle(fontSize: 12, color: c.muted, fontStyle: FontStyle.italic),
+            ),
+          ])),
+          Icon(Icons.chevron_right, color: c.muted, size: 20),
+        ]),
+      ),
     );
   }
 
@@ -6734,7 +6898,7 @@ class _MoreScreenState extends State<MoreScreen> {
         const SizedBox(height: 14),
         Container(height: 0.5, color: c.border),
         const SizedBox(height: 10),
-        Text('Version 1.0.0', style: TextStyle(color: c.muted, fontSize: 12)),
+        Text('Version 1.1.0', style: TextStyle(color: c.muted, fontSize: 12)),
       ])),
       actions: [GestureDetector(onTap: () => Navigator.pop(ctx), child: Container(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), decoration: BoxDecoration(color: c.gold, borderRadius: BorderRadius.circular(8)), child: Text('Close', style: TextStyle(color: widget.isDark ? const Color(0xFF0F0505) : Colors.white, fontWeight: FontWeight.w700))))],
     ));
@@ -6773,11 +6937,6 @@ class _MoreScreenState extends State<MoreScreen> {
               Divider(color: c.border, height: 0.5),
             ],
             _actionRow('Log Out', Icons.logout, c, c.red, _logout),
-          ]),
-          _sectionLabel('SPIRITUAL LIFE', c),
-          _settingsCard(c, children: [
-            _actionRow('Prayer Library', Icons.menu_book_outlined, c, c.gold, () => Navigator.push(context, MaterialPageRoute(
-              builder: (_) => PrayerLibraryScreen(isDark: widget.isDark)))),
           ]),
           _sectionLabel('NOTIFICATIONS', c),
           _settingsCard(c, children: [
@@ -6898,526 +7057,396 @@ class _MoreScreenState extends State<MoreScreen> {
 }
 
 // ═══════════════════════════════════════════════
-// PRAYER LIBRARY — የጸሎት መጽሐፍ
+// FASTING TRACKER
 // ═══════════════════════════════════════════════
 
-// A named part within a multi-part prayer (e.g. a booklet like Zewter
-// Tselot bundles several distinct prayers together, each with its own
-// title). Leave a PrayerItem's `sections` empty for a single-block prayer.
-class PrayerSection {
-  final String titleAmharic;
-  final String titleGeez;
-  final String geezText;
-  final String amharicText;
-  const PrayerSection({
-    required this.titleAmharic,
-    required this.titleGeez,
-    required this.geezText,
-    required this.amharicText,
-  });
-}
-
-class PrayerItem {
-  final String id;
-  final String titleGeez;
-  final String titleAmharic;
-  final String category; // Daily, Praise, Repentance, Liturgy
-  final String timeOfDay;
-  final String geezText;
-  final String amharicTranslation;
-  final List<PrayerSection> sections;
-  const PrayerItem({
-    required this.id,
-    required this.titleGeez,
-    required this.titleAmharic,
-    required this.category,
-    required this.timeOfDay,
-    required this.geezText,
-    required this.amharicTranslation,
-    this.sections = const [],
-  });
-}
-
-const List<PrayerItem> orthodoxPrayerSource = [
-  PrayerItem(
-    id: 'pr-1',
-    titleGeez: 'በስመ አብ ወወልድ ወመንፈስ ቅዱስ',
-    titleAmharic: 'አባታችን ሆይ (የዘወትር ጸሎት)',
-    category: 'Daily',
-    timeOfDay: 'Morning / Evening',
-    geezText: 'አቡነ ዘበሰማያት ይትቀደስ ስምከ፤ ትምጻእ መንግሥትከ፤ ወይኩን ፈቃድከ በከመ በሰማይ ከማሁ በምድር፤ ሲሳየነ ዘለለ ዕለትነ ሀበነ ዮም፤ ኅድግ ለነ አበሳነ ወጌጋየነ ከመ ንሕነኒ ንኅድግ ለዘአበሰ ለነ፤ ኢታብኦነ እግዚኦ ውስተ መንሱት፤ አላ አድኅነነ ወባልሐነ እምኩሉ እኩይ፤ እስመ ዚአከ ይእቲ መንግሥት ኃይል ወስብሐት ለዓለመ ዓለም አሜን።',
-    amharicTranslation: 'በሰማያት የምትኖር አባታችን ሆይ፤ ስምህ ይቀደስ፤ መንግሥትህ ትምጣ፤ ፈቃድህ በሰማይ እንደ ሆነች እንዲሁ በምድር ትሁን፤ የዕለት እንጀራችንን ስጠን ዛሬ፤ በደላችንንም ይቅር በለን፤ እኛም የበደሉንን ይቅር እንደምንል፤ አቤቱ ወደ ፈተና አታግባን፤ ከክፉ ሁሉ አድነን እንጂ፤ መንግሥት ያንተ ናትና ኃይልም ስብሐትም ለዘለዓለሙ አሜን።',
-    // NOTE: the Creed (የሃይማኖት ጸሎት) section is intentionally left out of
-    // this list — the text supplied for it had corrupted fragments
-    // ("በብHierarchy", "በ his ዮ P ጲላጦስ") that read like a generation
-    // glitch, not real Ge'ez. Add it back once the correct wording is
-    // confirmed.
-    sections: [
-      PrayerSection(
-        titleAmharic: 'የመክፈቻ ጸሎት',
-        titleGeez: 'በስመ አብ ወወልድ ወመንፈስ ቅዱስ',
-        geezText: 'በስመ አብ ወወልድ ወመንፈስ ቅዱስ አሐዱ አምላክ አሜን።\nስብሐት ለአብ፤ ስብሐት ለወልድ፤ ስብሐት ለመንፈስ ቅዱስ። (፫ ጊዜ)\nአአምን በአሐዱ አምላክ አምላከ ጽድቅ።\nአአምን በክርስቶስ አምላኪየ ዘአንሥአኒ እምነ ሞት።\nአአምን በመንፈስ ቅዱስ ዘያሐይወነ።',
-        amharicText: 'አንድ አምላክ በሚሆን በአብ በወልድ በመንፈስ ቅዱስ ስም አሜን።\nለአብ ምስጋና ይሁን፤ ለወልድ ምስጋና ይሁን፤ ለመንፈስ ቅዱስም ምስጋና ይሁን። (3 ጊዜ)\nእውነተኛ አምላክ በሚሆን በአንድ አምላክ እምናለሁ።\nከሞት ባነሣኝ በአምላኬ በክርስቶስ እምናለሁ።\nሕይወትን በሚሰጠን በመንፈስ ቅዱስ እምናለሁ።',
-      ),
-      PrayerSection(
-        titleAmharic: 'የጌታችን ጸሎት (አባታችን ሆይ)',
-        titleGeez: 'አቡነ ዘበሰማያት',
-        geezText: 'አቡነ ዘበሰማያት፤ ይትቀደስ ስምከ፤ ትምጻእ መንግሥትከ፤ ወይኩን ፈቃድከ በከመ በሰማይ፤ ከማሁ በምድር፤ ሲሳየነ ዘለለ ዕለትነ ሀበነ ዮም፤ ኅድግ ለነ አበሳነ ወጌጋየነ፤ ከመ ንሕነኒ ንኅድግ ለዘአበሰ ለነ፤ ኢታብኦነ እግዚኦ ውስተ መንሱት፤ አላ አድኅነነ ወባልሐነ እምኩሉ እኩይ፤ እስመ ዚአከ ይእቲ መንግሥት፤ ኃይል ወስብሐት፤ ለዓለመ ዓለም አሜን።',
-        amharicText: 'በሰማያት የምትኖር አባታችን ሆይ፤ ስምህ ይቀደስ፤ መንግሥትህ ትምጣ፤ ፈቃድህ በሰማይ እንደ ሆነች እንዲሁ በምድር ትሁን፤ የዕለት እንጀራችንን ስጠን ዛሬ፤ በደላችንንም ይቅር በለን፤ እኛም የበደሉንን ይቅር እንደምንል፤ አቤቱ ወደ ፈተና አታግባን፤ ከክፉ ሁሉ አድነን እንጂ፤ መንግሥት ያንተ ናትና ኃይልም ስብሐትም ለዘለዓለሙ አሜን።',
-      ),
-      PrayerSection(
-        titleAmharic: 'የእመቤታችን ጸሎት (ሰላምታ)',
-        titleGeez: 'ሰላም ለኪ',
-        geezText: 'በሰላመ ቅዱስ ገብርኤል መልአክ፤ እግዝእትየ ማርያም ሰላም ለኪ፤ ድንግል ብኅሊናኪ ወድንግል በሥጋኪ፤ እመ እግዚአብሔር ጸባኦት ሰላም ለኪ፤ ቡሩክት አንቲ እምአንስት ወቡሩክ ፍሬ ከርሥኪ፤ ተፈሥሒ ፍሥሕት ኦ ምልእተ ጸጋ፤ እግዚአብሔር ምስሌኪ፤ ሰአሊ ወጸልዪ ምሕረተ በኀበ ፍቁር ወልድኪ፤ ኢየሱስ ክርስቶስ፤ ከመ ይሥረይ ለነ ኃጣውኢነ አሜን።',
-        amharicText: 'በቅዱስ ገብርኤል መልአክ ሰላምታ እመቤታችን ቅድስት ድንግል ማርያም ሆይ ሰላም እንልሻለን፤ በሐሳብሽ ድንግል ነሽ፤ በሥጋሽም ድንግል ነሽ፤ የሠራዊት ጌታ የእግዚአብሔር እናት ሆይ ሰላምታ ይገባሻል፤ ከሴቶች ሁሉ ተለይተሽ የተባረክሽ ነሽ፤ የሆድሽም ፍሬ የተባረከ ነው፤ ጸጋን የተሞላሽ ሆይ ደስ ይበልሽ እግዚአብሔር ከአንቺ ጋር ነውና፤ ከፍቅር ልጅሽ ከጌታችን ከኢየሱስ ክርስቶስ ዘንድ ይቅርታንና ምሕረትን ለምኚልን ኃጢአታችንንም ይሠረይልን ዘንድ ለዘለዓለሙ አሜን።',
-      ),
-      PrayerSection(
-        titleAmharic: 'ቅዱስ ቅዱስ ቅዱስ (የመላእክት ምስጋና)',
-        titleGeez: 'ቅዱስ ቅዱስ ቅዱስ',
-        geezText: 'ቅዱስ ቅዱስ ቅዱስ እግዚአብሔር ጸባኦት ፍጹም ምሉዕ ሰማያተ ወምድረ ቅድሳተ ስብሐቲከ።\nንሰግድ ለከ ክርስቶስ ምስለ አቡከ ኄር ሰማያዊ ወመንፈስከ ቅዱስ ማሕየዊ እስመ መጻእከ ወአድኃንከነ።',
-        amharicText: 'የሠራዊት ጌታ እግዚአብሔር ቅዱስ ቅዱስ ቅዱስ ተብሎ ይመሰገናል። የምስጋናህ ቅድስና በሰማይና በምድር የመላ ነው።\nክርስቶስ ሆይ ከቸር ከሰማያዊ አባትህ ጋር ሕይወትን ከሚሰጥ ከቅዱስ መንፈስህ ጋር እንሰግድልሃለን፤ መጥተህ አድነኸናልና።',
-      ),
-      PrayerSection(
-        titleAmharic: 'የእመቤታችን ምስጋና (ሰላም ለኪ)',
-        titleGeez: 'ስብሐት ለኪ ኦ እግዝእትነ',
-        geezText: 'ለአብ ወወልድ ወመንፈስ ቅዱስ ስብሐት ወዕዝዝ ይእዜኒ ወዘልፈኒ ወለዓለመ ዓለም አሜን።\nተፈሥሒ ኦ ምልእተ ጸጋ፤ ተፈሥሒ እስመ ረከብኪ ጸጋ፤ ተፈሥሒ እግዚአብሔር ምስሌኪ።\nቡሩክት አንቲ እምአንስት፤ ወቡሩክ ፍሬ ከርሥኪ፤ ሰአሊ ወጸልዪ በኀበ ፍቁር ወልድኪ ከመ ይሥረይ ለነ ኃጣውኢነ።',
-        amharicText: 'ለአብ ለወልድ ለመንፈስ ቅዱስ ምስጋናና ጌትነት ይገባል፤ ዛሬም ዘወትርም ለዘለዓለሙ አሜን።\nጸጋን የተሞላሽ ሆይ ደስ ይበልሽ፤ ጸጋን አግኝተሻልና ደስ ይበልሽ፤ እግዚአብሔር ከአንቺ ጋር ነውና ደስ ይበልሽ።\nከሴቶች ሁሉ ተለይተሽ የተባረክሽ ነሽ፤ የሆድሽም ፍሬ የተባረከ ነው፤ ኃጢአታችንን ይሠረይልን ዘንድ ከፍቅር ልጅሽ ዘንድ ለምኚልን።',
-      ),
-    ],
-  ),
-  PrayerItem(
-    id: 'pr-2',
-    titleGeez: 'ሰላም ለኪ ማርያም',
-    titleAmharic: 'እመቤታችን ማርያም ሆይ ሰላምታ ይገባሻል',
-    category: 'Praise',
-    timeOfDay: 'Daily',
-    geezText: 'በሰላመ ቅዱስ ገብርኤል መልአክ፡ እግዝእትየ ማርያም ሰላም ለኪ፤ ድንግል ብኅሊናኪ ወድንግል በሥጋኪ፤ እመ እግዚአብሔር ጸባኦት ሰላም ለኪ፤ ቡሩክት አንቲ እምአንስት ወቡሩክ ፍሬ ከርሥኪ፤ ተፈሥሒ ፍሥሕት ኦ ምልእተ ጸጋ እግዚአብሔር ምስሌኪ፤ ሰአሊ ወጸልዪ ምሕረተ በኀበ ፍቁር ወልድኪ ኢየሱስ ክርስቶስ ከመ ይሥረይ ለነ ኃጣውኢነ አሜን።',
-    amharicTranslation: 'እመቤታችን ቅድስት ድንግል ማርያም ሆይ፤ በቅዱስ ገብርኤል መልአክ ሰላምታ ሰላም እንልሻለን፤ በሐሳብሽ ድንግል ነሽ፤ በሥጋሽም ድንግል ነሽ፤ የሠራዊት ጌታ የእግዚአብሔር እናት ሆይ ሰላምታ ይገባሻል፤ ከሴቶች ሁሉ ተለይተሽ የተባረክሽ ነሽ፤ የሆድሽም ፍሬ የተባረከ ነው፤ ጸጋን የተሞላሽ ሆይ ደስ ይበልሽ እግዚአብሔር ከአንቺ ጋር ነውና፤ ከፍቅር ልጅሽ ከጌታችን ከኢየሱስ ክርስቶስ ዘንድ ይቅርታንና ምሕረትን ለምኚልን ኃጢአታችንንም ይሠረይልን ዘንድ ለዘለዓለሙ አሜን።',
-  ),
-  PrayerItem(
-    id: 'pr-3',
-    titleGeez: 'ውዳሴ ማርያም (ዘሰኞ)',
-    titleAmharic: 'የሰኞ ውዳሴ ማርያም',
-    category: 'Daily',
-    timeOfDay: 'Monday',
-    geezText: 'ፈቀደ እግዚእ ያግዕዞ ለአዳም ኅዙነ ወትኩዘ ልብ፤ ወያግብኦ ውስተ ቀዲሙ ብሔር፤ ሰአሊ ለነ ቅድስት...',
-    amharicTranslation: 'ያዘነና የተቀዘነ አዳምን ነጻ ያወጣው ዘንድ፥ ወደ ቀደመ ቦታውም ይመልሰው ዘንድ ጌታ ፈቀደ። ቅድስት ሆይ ለምኚልን...',
-  ),
-];
-
-class PrayerLibraryScreen extends StatefulWidget {
+class FastingTrackerScreen extends StatefulWidget {
   final bool isDark;
-  const PrayerLibraryScreen({super.key, required this.isDark});
+  const FastingTrackerScreen({super.key, required this.isDark});
   @override
-  State<PrayerLibraryScreen> createState() => _PrayerLibraryScreenState();
+  State<FastingTrackerScreen> createState() => _FastingTrackerScreenState();
 }
 
-class _PrayerLibraryScreenState extends State<PrayerLibraryScreen> {
-  final _searchCtrl = TextEditingController();
-  String _searchQuery = '';
-  String _selectedCategory = 'All';
-  bool _bookmarksOnly = false;
-  Set<String> _bookmarks = {};
+class _FastingTrackerScreenState extends State<FastingTrackerScreen> {
+  int _streak = 0;
+  int _longest = 0;
+  bool _checkedInToday = false;
   bool _loaded = false;
-
-  static const _categories = ['All', 'Daily', 'Praise', 'Repentance', 'Liturgy'];
 
   @override
   void initState() {
     super.initState();
-    _loadBookmarks();
+    _load();
   }
 
-  @override
-  void dispose() {
-    _searchCtrl.dispose();
-    super.dispose();
+  String _dateKey(DateTime d) => '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+  DateTime? _mostRecentFastDayBefore(DateTime date) {
+    var d = _dateOnly(date).subtract(const Duration(days: 1));
+    for (int i = 0; i < 400; i++) {
+      if (isFastingDay(d)) return d;
+      d = d.subtract(const Duration(days: 1));
+    }
+    return null;
   }
 
-  Future<void> _loadBookmarks() async {
+  Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
-    final saved = prefs.getStringList('prayer_bookmarks');
+    final streak = prefs.getInt('fast_streak_count') ?? 0;
+    final longest = prefs.getInt('fast_streak_longest') ?? 0;
+    final lastKey = prefs.getString('fast_streak_last_checkin');
+    final now = DateTime.now();
+    final todayKey = _dateKey(now);
+
+    int currentStreak = streak;
+    final checkedToday = lastKey == todayKey;
+
+    if (!checkedToday && lastKey != null) {
+      // The streak survives if their last check-in was on the most recent
+      // fasting day before today — i.e. they haven't missed one since.
+      final prevFastDay = _mostRecentFastDayBefore(now);
+      final expectedKey = prevFastDay != null ? _dateKey(prevFastDay) : null;
+      if (lastKey != expectedKey) {
+        currentStreak = 0;
+        await prefs.setInt('fast_streak_count', 0);
+      }
+    }
+
+    if (!mounted) return;
     setState(() {
-      _bookmarks = saved != null ? saved.toSet() : {'pr-1', 'pr-3'};
+      _streak = currentStreak;
+      _longest = longest;
+      _checkedInToday = checkedToday;
       _loaded = true;
     });
   }
 
-  Future<void> _toggleBookmark(String id) async {
+  Future<void> _checkIn() async {
+    if (_checkedInToday || !isFastingDay(DateTime.now())) return;
     final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      if (_bookmarks.contains(id)) {
-        _bookmarks.remove(id);
-      } else {
-        _bookmarks.add(id);
-      }
-    });
-    await prefs.setStringList('prayer_bookmarks', _bookmarks.toList());
+    final newStreak = _streak + 1;
+    final newLongest = newStreak > _longest ? newStreak : _longest;
+    await prefs.setInt('fast_streak_count', newStreak);
+    await prefs.setInt('fast_streak_longest', newLongest);
+    await prefs.setString('fast_streak_last_checkin', _dateKey(DateTime.now()));
+    setState(() { _streak = newStreak; _longest = newLongest; _checkedInToday = true; });
+    if (!mounted) return;
+    String msg = '🕊 Day $newStreak of fasting faithfulness!';
+    if (newStreak == 7) msg = '🎉 A full week of fasting!';
+    if (newStreak == 40) msg = '⛪ 40 days — the length of Great Lent!';
+    if (newStreak == 100) msg = '👑 100 fasting days. Truly faithful!';
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg, style: TextStyle(color: AppColors(widget.isDark).text)),
+      backgroundColor: AppColors(widget.isDark).card,
+      duration: const Duration(seconds: 3),
+    ));
   }
 
-  List<PrayerItem> get _filtered => orthodoxPrayerSource.where((p) {
-    final q = _searchQuery.trim();
-    final matchesSearch = q.isEmpty ||
-        p.titleGeez.contains(q) || p.titleAmharic.contains(q) || p.amharicTranslation.contains(q);
-    final matchesCategory = _selectedCategory == 'All' || p.category == _selectedCategory;
-    final matchesTab = !_bookmarksOnly || _bookmarks.contains(p.id);
-    return matchesSearch && matchesCategory && matchesTab;
-  }).toList();
-
-  void _resetFilters() => setState(() {
-    _searchCtrl.clear();
-    _searchQuery = '';
-    _selectedCategory = 'All';
-    _bookmarksOnly = false;
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final c = AppColors(widget.isDark);
-    final results = _filtered;
-    return Scaffold(
-      backgroundColor: c.bg,
-      body: SafeArea(child: Column(children: [
-        Container(
-          color: c.hero, padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
-              GestureDetector(onTap: () => Navigator.pop(context), child: Icon(Icons.arrow_back_ios, color: c.gold, size: 20)),
-              const SizedBox(width: 10),
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('የጸሎት መጽሐፍ', style: TextStyle(fontSize: 18, color: c.text, fontWeight: FontWeight.w800)),
-                Text('Orthodox Tewahedo Prayer Library', style: TextStyle(fontSize: 11, color: c.muted, fontStyle: FontStyle.italic)),
-              ])),
-              Icon(Icons.auto_awesome, color: c.gold, size: 20),
-            ]),
-            const SizedBox(height: 14),
-            TextField(
-              controller: _searchCtrl,
-              onChanged: (v) => setState(() => _searchQuery = v),
-              style: TextStyle(color: c.text, fontSize: 14),
-              decoration: InputDecoration(
-                hintText: 'ጸሎት ይፈልጉ... (Search prayers)',
-                hintStyle: TextStyle(color: c.muted, fontSize: 13),
-                prefixIcon: Icon(Icons.search, color: c.muted, size: 20),
-                filled: true, fillColor: c.card,
-                contentPadding: const EdgeInsets.symmetric(vertical: 12),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: c.border, width: 0.5)),
-                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: c.border, width: 0.5)),
-                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: c.gold, width: 1.5)),
-              ),
-            ),
-            const SizedBox(height: 10),
-            Row(children: [
-              Expanded(child: _tabBtn('ሁሉንም (All)', !_bookmarksOnly, c, () => setState(() => _bookmarksOnly = false))),
-              const SizedBox(width: 8),
-              Expanded(child: _tabBtn('የተመረጡ (Saved)', _bookmarksOnly, c, () => setState(() => _bookmarksOnly = true), icon: Icons.bookmark)),
-            ]),
-            const SizedBox(height: 10),
-            SizedBox(
-              height: 32,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: _categories.length,
-                separatorBuilder: (_, _) => const SizedBox(width: 8),
-                itemBuilder: (_, i) {
-                  final cat = _categories[i];
-                  final active = _selectedCategory == cat;
-                  return GestureDetector(
-                    onTap: () => setState(() => _selectedCategory = cat),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14),
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: active ? c.gold : c.card,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: active ? c.gold : c.border, width: 0.5),
-                      ),
-                      child: Text(cat, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
-                        color: active ? (widget.isDark ? const Color(0xFF0F0505) : Colors.white) : c.muted)),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ]),
-        ),
-        Divider(color: c.border, height: 0.5),
-        Expanded(
-          child: !_loaded ? Center(child: CircularProgressIndicator(color: c.gold))
-            : results.isEmpty ? _emptyState(c) : ListView.builder(
-              padding: const EdgeInsets.all(14),
-              itemCount: results.length,
-              itemBuilder: (_, i) => _prayerCard(results[i], c),
-            ),
-        ),
-      ])),
-    );
-  }
-
-  Widget _tabBtn(String label, bool active, AppColors c, VoidCallback onTap, {IconData? icon}) => GestureDetector(
-    onTap: onTap,
-    child: Container(
-      padding: const EdgeInsets.symmetric(vertical: 9),
-      decoration: BoxDecoration(
-        color: active ? c.gold : c.card,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: active ? c.gold : c.border, width: 0.5),
-      ),
-      child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-        if (icon != null) ...[Icon(icon, size: 13, color: active ? (widget.isDark ? const Color(0xFF0F0505) : Colors.white) : c.muted), const SizedBox(width: 5)],
-        Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
-          color: active ? (widget.isDark ? const Color(0xFF0F0505) : Colors.white) : c.muted)),
-      ]),
-    ),
-  );
-
-  Widget _prayerCard(PrayerItem p, AppColors c) {
-    final bookmarked = _bookmarks.contains(p.id);
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: Material(
-        color: c.card,
-        borderRadius: BorderRadius.circular(16),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(16),
-          onTap: () async {
-            await Navigator.push(context, MaterialPageRoute(
-              builder: (_) => PrayerDetailScreen(isDark: widget.isDark, initialId: p.id),
-            ));
-            _loadBookmarks(); // pick up any bookmark change made from the reader
-          },
-          child: Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: c.border, width: 0.5),
-              boxShadow: [BoxShadow(color: Colors.black.withAlpha(10), blurRadius: 8, offset: const Offset(0, 2))],
-            ),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(color: c.goldBg, borderRadius: BorderRadius.circular(6)),
-                    child: Text(p.category, style: TextStyle(fontSize: 10, color: c.gold, fontWeight: FontWeight.w700)),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(p.titleAmharic, style: TextStyle(fontSize: 15, color: c.text, fontWeight: FontWeight.w800)),
-                  Text(p.titleGeez, style: TextStyle(fontSize: 12, color: c.muted, fontStyle: FontStyle.italic)),
-                ])),
-                GestureDetector(
-                  onTap: () => _toggleBookmark(p.id),
-                  child: Icon(bookmarked ? Icons.bookmark : Icons.bookmark_border, color: bookmarked ? c.gold : c.muted, size: 20),
-                ),
-              ]),
-              const SizedBox(height: 10),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(color: c.goldBg.withAlpha(120), borderRadius: BorderRadius.circular(10)),
-                child: Text(p.amharicTranslation, maxLines: 3, overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 12, color: c.text, height: 1.6)),
-              ),
-              const SizedBox(height: 8),
-              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                Row(children: [
-                  Icon(Icons.access_time, size: 13, color: c.gold.withAlpha(160)),
-                  const SizedBox(width: 4),
-                  Text(p.timeOfDay, style: TextStyle(fontSize: 11, color: c.muted)),
-                ]),
-                Row(children: [
-                  Text('ንበብ (Read)', style: TextStyle(fontSize: 11, color: c.gold, fontWeight: FontWeight.w700)),
-                  Icon(Icons.chevron_right, size: 16, color: c.gold),
-                ]),
-              ]),
-            ]),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _emptyState(AppColors c) => Center(
-    child: Padding(
-      padding: const EdgeInsets.all(32),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Container(
-          width: 72, height: 72,
-          decoration: BoxDecoration(color: c.goldBg, shape: BoxShape.circle, border: Border.all(color: c.gold, width: 0.5)),
-          child: Center(child: Icon(Icons.menu_book_outlined, color: c.gold, size: 32)),
-        ),
-        const SizedBox(height: 16),
-        Text('ምንም ጸሎት አልተገኘም', style: TextStyle(fontSize: 16, color: c.text, fontWeight: FontWeight.w800)),
-        const SizedBox(height: 6),
-        Text('No prayers match your selected filters or search terms at this time.',
-          textAlign: TextAlign.center, style: TextStyle(fontSize: 12, color: c.muted, height: 1.5)),
-        const SizedBox(height: 20),
-        GestureDetector(
-          onTap: _resetFilters,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-            decoration: BoxDecoration(color: c.gold, borderRadius: BorderRadius.circular(12)),
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Icon(Icons.refresh, size: 15, color: widget.isDark ? const Color(0xFF0F0505) : Colors.white),
-              const SizedBox(width: 6),
-              Text('ሁሉንም አሳይ (Reset View)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: widget.isDark ? const Color(0xFF0F0505) : Colors.white)),
-            ]),
-          ),
-        ),
-      ]),
-    ),
-  );
-}
-
-class PrayerDetailScreen extends StatefulWidget {
-  final bool isDark;
-  final String initialId;
-  const PrayerDetailScreen({super.key, required this.isDark, required this.initialId});
-  @override
-  State<PrayerDetailScreen> createState() => _PrayerDetailScreenState();
-}
-
-class _PrayerDetailScreenState extends State<PrayerDetailScreen> {
-  late PrayerItem _current = orthodoxPrayerSource.firstWhere(
-    (p) => p.id == widget.initialId,
-    orElse: () => orthodoxPrayerSource.first,
-  );
-  Set<String> _bookmarks = {};
-
-  @override
-  void initState() {
-    super.initState();
-    _loadBookmarks();
-  }
-
-  Future<void> _loadBookmarks() async {
-    final prefs = await SharedPreferences.getInstance();
-    final saved = prefs.getStringList('prayer_bookmarks');
-    setState(() => _bookmarks = saved != null ? saved.toSet() : {'pr-1', 'pr-3'});
-  }
-
-  Future<void> _toggleBookmark() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      if (_bookmarks.contains(_current.id)) {
-        _bookmarks.remove(_current.id);
-      } else {
-        _bookmarks.add(_current.id);
-      }
-    });
-    await prefs.setStringList('prayer_bookmarks', _bookmarks.toList());
+  String _fmt(DateTime d) {
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return '${months[d.month - 1]} ${d.day}';
   }
 
   @override
   Widget build(BuildContext context) {
     final c = AppColors(widget.isDark);
-    final p = _current;
-    final bookmarked = _bookmarks.contains(p.id);
+    final now = DateTime.now();
+    final period = currentFastingPeriod(now);
+    final fasting = isFastingDay(now);
     return Scaffold(
       backgroundColor: c.bg,
       body: SafeArea(child: Column(children: [
         Container(
-          color: c.hero, padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
-              GestureDetector(onTap: () => Navigator.pop(context), child: Icon(Icons.arrow_back_ios, color: c.gold, size: 20)),
-              const SizedBox(width: 10),
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(p.titleAmharic, style: TextStyle(fontSize: 15, color: c.text, fontWeight: FontWeight.w800), maxLines: 1, overflow: TextOverflow.ellipsis),
-                Text(p.category, style: TextStyle(fontSize: 11, color: c.muted)),
-              ])),
-              GestureDetector(
-                onTap: _toggleBookmark,
-                child: Icon(bookmarked ? Icons.bookmark : Icons.bookmark_border, color: c.gold, size: 22),
-              ),
-            ]),
-            const SizedBox(height: 12),
-            // Quick-switch to another prayer without leaving the reader
-            SizedBox(
-              height: 32,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: orthodoxPrayerSource.length,
-                separatorBuilder: (_, _) => const SizedBox(width: 8),
-                itemBuilder: (_, i) {
-                  final other = orthodoxPrayerSource[i];
-                  final active = other.id == p.id;
-                  return GestureDetector(
-                    onTap: () => setState(() => _current = other),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14),
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: active ? c.gold : c.card,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: active ? c.gold : c.border, width: 0.5),
-                      ),
-                      child: Text(other.titleAmharic, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
-                        color: active ? (widget.isDark ? const Color(0xFF0F0505) : Colors.white) : c.muted)),
-                    ),
-                  );
-                },
-              ),
+          color: c.hero, padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+          child: Row(children: [
+            GestureDetector(onTap: () => Navigator.pop(context), child: Icon(Icons.arrow_back_ios, color: c.gold, size: 20)),
+            const SizedBox(width: 10),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('FASTING TRACKER', style: TextStyle(fontSize: 15, color: c.text, letterSpacing: 2, fontWeight: FontWeight.w800)),
+              Text('የጾም ክትትል', style: TextStyle(fontSize: 11, color: c.muted, fontStyle: FontStyle.italic)),
+            ])),
+            GestureDetector(
+              onTap: () => Navigator.push(context, MaterialPageRoute(
+                builder: (_) => ShareCardScreen(isDark: widget.isDark, initialTab: 0))),
+              child: Icon(Icons.ios_share_rounded, color: c.gold, size: 20),
             ),
           ]),
         ),
         Divider(color: c.border, height: 0.5),
-        Expanded(child: SingleChildScrollView(
-          key: ValueKey(p.id),
+        Expanded(child: !_loaded ? Center(child: CircularProgressIndicator(color: c.gold)) : SingleChildScrollView(
           padding: const EdgeInsets.all(18),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(p.titleGeez, style: TextStyle(fontSize: 18, color: c.gold, fontWeight: FontWeight.w800, height: 1.5)),
-            const SizedBox(height: 4),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: fasting ? c.goldBg : c.card, borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: fasting ? c.gold : c.border, width: fasting ? 1.5 : 0.5),
+              ),
+              child: Column(children: [
+                Text(fasting ? '✦ Today is a Fasting Day' : 'Not a fasting day today',
+                  style: TextStyle(fontSize: 15, color: c.text, fontWeight: FontWeight.w800)),
+                const SizedBox(height: 4),
+                Text(fasting ? 'ዛሬ የጾም ቀን ነው' : 'ዛሬ የጾም ቀን አይደለም', style: TextStyle(fontSize: 12, color: c.muted, fontStyle: FontStyle.italic)),
+                const SizedBox(height: 16),
+                GestureDetector(
+                  onTap: fasting ? _checkIn : null,
+                  child: Container(
+                    width: double.infinity, padding: const EdgeInsets.symmetric(vertical: 14),
+                    decoration: BoxDecoration(
+                      color: !fasting ? c.border : (_checkedInToday ? c.green.withAlpha(40) : c.gold),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Center(child: _checkedInToday
+                      ? Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                          Icon(Icons.check_circle, color: c.green, size: 18), const SizedBox(width: 6),
+                          Text('Fasted Today', style: TextStyle(fontSize: 14, color: c.green, fontWeight: FontWeight.w800)),
+                        ])
+                      : Text(fasting ? "I'm Fasting Today" : 'No fast today',
+                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800,
+                            color: fasting ? (widget.isDark ? const Color(0xFF0F0505) : Colors.white) : c.muted)),
+                    ),
+                  ),
+                ),
+              ]),
+            ),
+            const SizedBox(height: 16),
+            if (period != null) ...[
+              Container(
+                width: double.infinity, padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(color: c.card, borderRadius: BorderRadius.circular(16), border: Border.all(color: c.border, width: 0.5)),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    Expanded(child: Text('${period.nameEnglish} (${period.nameAmharic})', style: TextStyle(fontSize: 14, color: c.text, fontWeight: FontWeight.w700))),
+                    Text('Day ${period.dayNumber(now)}/${period.totalDays}', style: TextStyle(fontSize: 12, color: c.gold, fontWeight: FontWeight.w700)),
+                  ]),
+                  const SizedBox(height: 10),
+                  ClipRRect(borderRadius: BorderRadius.circular(4), child: LinearProgressIndicator(
+                    value: (period.dayNumber(now) / period.totalDays).clamp(0.0, 1.0),
+                    backgroundColor: c.border, valueColor: AlwaysStoppedAnimation<Color>(c.gold), minHeight: 6,
+                  )),
+                ]),
+              ),
+              const SizedBox(height: 16),
+            ],
             Row(children: [
-              Icon(Icons.access_time, size: 13, color: c.muted),
-              const SizedBox(width: 4),
-              Text(p.timeOfDay, style: TextStyle(fontSize: 12, color: c.muted)),
+              Expanded(child: _statTile('🔥', '$_streak', 'Current Streak', c)),
+              const SizedBox(width: 12),
+              Expanded(child: _statTile('🏆', '$_longest', 'Longest Streak', c)),
             ]),
             const SizedBox(height: 20),
-            if (p.sections.isNotEmpty)
-              ...p.sections.map((s) => _sectionBlock(s, c))
-            else ...[
-              Text('ግዕዝ (Ge\'ez)', style: TextStyle(fontSize: 11, color: c.gold, letterSpacing: 1, fontWeight: FontWeight.w700)),
-              const SizedBox(height: 8),
-              Container(
-                width: double.infinity, padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(color: c.card, borderRadius: BorderRadius.circular(14), border: Border.all(color: c.border, width: 0.5)),
-                child: Text(p.geezText, style: TextStyle(fontSize: 15, color: c.text, height: 1.9)),
-              ),
-              const SizedBox(height: 20),
-              Text('አማርኛ (Amharic)', style: TextStyle(fontSize: 11, color: c.gold, letterSpacing: 1, fontWeight: FontWeight.w700)),
-              const SizedBox(height: 8),
-              Container(
-                width: double.infinity, padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(color: c.goldBg, borderRadius: BorderRadius.circular(14), border: Border.all(color: c.gold.withAlpha(70), width: 0.5)),
-                child: Text(p.amharicTranslation, style: TextStyle(fontSize: 14, color: c.text, height: 1.9)),
-              ),
-            ],
-            const SizedBox(height: 30),
+            Text("THIS YEAR'S FASTS", style: TextStyle(fontSize: 11, color: c.label, letterSpacing: 2, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 10),
+            ...fastingPeriodsForYear(now.year).map((p) => _periodRow(p, now, c)),
+            const SizedBox(height: 24),
           ]),
         )),
       ])),
     );
   }
 
-  Widget _sectionBlock(PrayerSection s, AppColors c) => Container(
-    margin: const EdgeInsets.only(bottom: 18),
-    padding: const EdgeInsets.all(14),
-    decoration: BoxDecoration(color: c.card, borderRadius: BorderRadius.circular(14), border: Border.all(color: c.border, width: 0.5)),
-    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Row(children: [
-        Container(width: 3, height: 14, color: c.gold, margin: const EdgeInsets.only(right: 8)),
-        Expanded(child: Text('${s.titleAmharic} (${s.titleGeez})',
-          style: TextStyle(fontSize: 12, color: c.gold, fontWeight: FontWeight.w700))),
-      ]),
-      const SizedBox(height: 10),
-      Container(
-        width: double.infinity, padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(color: c.goldBg.withAlpha(120), borderRadius: BorderRadius.circular(12)),
-        child: Text(s.geezText, style: TextStyle(fontSize: 14.5, color: c.text, height: 1.85)),
-      ),
-      const SizedBox(height: 10),
-      Text(s.amharicText, style: TextStyle(fontSize: 13.5, color: c.text, height: 1.8)),
+  Widget _statTile(String emoji, String value, String label, AppColors c) => Container(
+    padding: const EdgeInsets.symmetric(vertical: 18),
+    decoration: BoxDecoration(color: c.card, borderRadius: BorderRadius.circular(16), border: Border.all(color: c.border, width: 0.5)),
+    child: Column(children: [
+      Text(emoji, style: const TextStyle(fontSize: 22)),
+      const SizedBox(height: 6),
+      Text(value, style: TextStyle(fontSize: 20, color: c.text, fontWeight: FontWeight.w800)),
+      const SizedBox(height: 2),
+      Text(label, style: TextStyle(fontSize: 11, color: c.muted)),
     ]),
   );
+
+  Widget _periodRow(FastingPeriod p, DateTime now, AppColors c) {
+    final active = p.contains(now);
+    final past = now.isAfter(p.end);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: active ? c.goldBg : c.card, borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: active ? c.gold : c.border, width: active ? 1 : 0.5),
+      ),
+      child: Row(children: [
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('${p.nameEnglish} (${p.nameAmharic})', style: TextStyle(fontSize: 13, color: c.text, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 2),
+          Text('${_fmt(p.start)} – ${_fmt(p.end)} · ${p.totalDays} days', style: TextStyle(fontSize: 11, color: c.muted)),
+        ])),
+        if (active)
+          Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3), decoration: BoxDecoration(color: c.gold, borderRadius: BorderRadius.circular(8)),
+            child: Text('NOW', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: widget.isDark ? const Color(0xFF0F0505) : Colors.white)))
+        else if (past)
+          Icon(Icons.check_circle_outline, color: c.muted, size: 16)
+        else
+          Icon(Icons.schedule, color: c.muted, size: 16),
+      ]),
+    );
+  }
 }
+
+// ═══════════════════════════════════════════════
+// SHARE CARD
+// ═══════════════════════════════════════════════
+
+class ShareCardScreen extends StatefulWidget {
+  final bool isDark;
+  final int initialTab; // 0 = fasting streak, 1 = today's saint/feast
+  const ShareCardScreen({super.key, required this.isDark, this.initialTab = 0});
+  @override
+  State<ShareCardScreen> createState() => _ShareCardScreenState();
+}
+
+class _ShareCardScreenState extends State<ShareCardScreen> {
+  late int _tab = widget.initialTab;
+  final GlobalKey _cardKey = GlobalKey();
+  bool _sharing = false;
+  int _streak = 0;
+  int _longest = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _streak = prefs.getInt('fast_streak_count') ?? 0;
+      _longest = prefs.getInt('fast_streak_longest') ?? 0;
+    });
+  }
+
+  Future<void> _share() async {
+    setState(() => _sharing = true);
+    try {
+      final boundary = _cardKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
+      final image = await boundary.toImage(pixelRatio: 3.0);
+      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      final bytes = byteData!.buffer.asUint8List();
+      final file = File('${Directory.systemTemp.path}/yenefs_abat_share_${DateTime.now().millisecondsSinceEpoch}.png');
+      await file.writeAsBytes(bytes);
+      if (!mounted) return;
+      await Share.shareXFiles([XFile(file.path)], text: 'Yenefs Abat — የነፍስ አባት');
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not share: $e')));
+    } finally {
+      if (mounted) setState(() => _sharing = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppColors(widget.isDark);
+    final today = EthiopianCalendar.today();
+    final feast = getEotcDay(today.month, today.day);
+    final synaxarium = getSynaxarium(today.month, today.day);
+    return Scaffold(
+      backgroundColor: c.bg,
+      body: SafeArea(child: Column(children: [
+        Container(
+          color: c.hero, padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+          child: Row(children: [
+            GestureDetector(onTap: () => Navigator.pop(context), child: Icon(Icons.arrow_back_ios, color: c.gold, size: 20)),
+            const SizedBox(width: 10),
+            Text('SHARE CARD', style: TextStyle(fontSize: 15, color: c.text, letterSpacing: 2, fontWeight: FontWeight.w800)),
+          ]),
+        ),
+        Divider(color: c.border, height: 0.5),
+        Expanded(child: SingleChildScrollView(
+          padding: const EdgeInsets.all(20),
+          child: Column(children: [
+            Row(children: [
+              Expanded(child: _tabBtn('🔥 Fasting Streak', _tab == 0, c, () => setState(() => _tab = 0))),
+              const SizedBox(width: 10),
+              Expanded(child: _tabBtn("☩ Today's Saint", _tab == 1, c, () => setState(() => _tab = 1))),
+            ]),
+            const SizedBox(height: 24),
+            RepaintBoundary(
+              key: _cardKey,
+              child: _tab == 0 ? _streakCardDesign(c) : _saintCardDesign(c, today, feast, synaxarium),
+            ),
+            const SizedBox(height: 28),
+            GestureDetector(
+              onTap: _sharing ? null : _share,
+              child: Container(
+                width: double.infinity, padding: const EdgeInsets.symmetric(vertical: 16),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(colors: [Color(0xFFE3C878), Color(0xFFC9A84C), Color(0xFFA98937)]),
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [BoxShadow(color: c.gold.withAlpha(110), blurRadius: 16, offset: const Offset(0, 6))],
+                ),
+                child: Center(child: _sharing
+                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white))
+                  : Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                      Icon(Icons.ios_share_rounded, color: widget.isDark ? const Color(0xFF0F0505) : Colors.white, size: 20),
+                      const SizedBox(width: 8),
+                      Text('Share', style: TextStyle(color: widget.isDark ? const Color(0xFF0F0505) : Colors.white, fontWeight: FontWeight.w800, fontSize: 15)),
+                    ])),
+              ),
+            ),
+          ]),
+        )),
+      ])),
+    );
+  }
+
+  Widget _tabBtn(String label, bool active, AppColors c, VoidCallback onTap) => GestureDetector(
+    onTap: onTap,
+    child: Container(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      decoration: BoxDecoration(
+        color: active ? c.gold : c.card, borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: active ? c.gold : c.border, width: 0.5),
+      ),
+      child: Center(child: Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700,
+        color: active ? (widget.isDark ? const Color(0xFF0F0505) : Colors.white) : c.muted))),
+    ),
+  );
+
+  Widget _cardShell(AppColors c, {required Widget child}) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(28),
+    decoration: BoxDecoration(
+      gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [c.hero, c.bg]),
+      borderRadius: BorderRadius.circular(24),
+      border: Border.all(color: c.gold, width: 1.5),
+    ),
+    child: Column(children: [
+      child,
+      const SizedBox(height: 24),
+      Container(width: 40, height: 2, color: c.gold),
+      const SizedBox(height: 10),
+      Text('YENEFS ABAT', style: TextStyle(fontSize: 11, color: c.gold, letterSpacing: 3, fontWeight: FontWeight.w800)),
+      Text('የነፍስ አባት', style: TextStyle(fontSize: 10, color: c.muted, fontStyle: FontStyle.italic)),
+    ]),
+  );
+
+  Widget _streakCardDesign(AppColors c) => _cardShell(c, child: Column(children: [
+    const Text('🔥', style: TextStyle(fontSize: 56)),
+    const SizedBox(height: 12),
+    Text('$_streak', style: TextStyle(fontSize: 56, color: c.gold, fontWeight: FontWeight.w900, height: 1)),
+    const SizedBox(height: 4),
+    Text('DAY FASTING STREAK', style: TextStyle(fontSize: 13, color: c.text, letterSpacing: 2, fontWeight: FontWeight.w800)),
+    const SizedBox(height: 6),
+    Text('Longest: $_longest days', style: TextStyle(fontSize: 12, color: c.muted)),
+  ]));
+
+  Widget _saintCardDesign(AppColors c, EthiopianDate today, EotcDay? feast, SynaxariumEntry? synaxarium) => _cardShell(c, child: Column(children: [
+    Text(feast?.isAnnual == true ? '⭐' : '☩', style: const TextStyle(fontSize: 48)),
+    const SizedBox(height: 12),
+    Text(feast?.name ?? 'No feast today', textAlign: TextAlign.center,
+      style: TextStyle(fontSize: 19, color: c.text, fontWeight: FontWeight.w800, height: 1.3)),
+    const SizedBox(height: 6),
+    Text('${today.monthNameAmharic} ${today.day}, ${today.year}', style: TextStyle(fontSize: 12, color: c.gold)),
+    if (synaxarium != null) ...[
+      const SizedBox(height: 14),
+      Text(synaxarium.snippet, textAlign: TextAlign.center, maxLines: 4, overflow: TextOverflow.ellipsis,
+        style: TextStyle(fontSize: 12.5, color: c.muted, height: 1.6)),
+    ],
+  ]));
+}
+

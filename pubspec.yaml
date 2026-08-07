@@ -2,7 +2,7 @@ name: yenefs_abat
 description: "A new Flutter project."
 publish_to: 'none'
 
-version: 1.0.0+1
+version: 1.1.0+2
 
 environment:
   sdk: ^3.12.1
@@ -18,11 +18,32 @@ dependencies:
   latlong2: ^0.9.1
   url_launcher: ^6.3.0
   timezone: ^0.9.4
+  firebase_core: ^4.12.1
+  firebase_auth: ^6.5.6
+  cloud_firestore: ^6.7.1
+  share_plus: 7.2.2
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.1
+
+# share_plus pulls in path_provider transitively, and the newest
+# path_provider versions ship jni/objective_c-based native-asset build
+# hooks that crash the Android Gradle build on this machine. Pin to a
+# pre-native-assets release to sidestep it.
+dependency_overrides:
+  path_provider: 2.1.2
+  path_provider_android: 2.2.11
+  path_provider_foundation: 2.3.2
+
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/icon/app_icon.png"
+  adaptive_icon_background: "#FDFDFD"
+  adaptive_icon_foreground: "assets/icon/app_icon_foreground.png"
 
 flutter:
 
