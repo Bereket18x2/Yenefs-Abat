@@ -467,6 +467,285 @@ class AppColors {
 }
 
 // ═══════════════════════════════════════════════
+// SPLASH SCREEN
+// ═══════════════════════════════════════════════
+
+class SplashScreen extends StatefulWidget {
+  final VoidCallback onDone;
+  const SplashScreen({super.key, required this.onDone});
+  @override
+  State<SplashScreen> createState() => _SplashScreenState();
+}
+
+class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 1100));
+  late final Animation<double> _fade = CurvedAnimation(parent: _ctrl, curve: const Interval(0.0, 0.7, curve: Curves.easeOut));
+  late final Animation<double> _scale = CurvedAnimation(parent: _ctrl, curve: const Interval(0.0, 1.0, curve: Curves.easeOutBack));
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl.forward();
+    // Hold on screen for ~2s total regardless of how fast the entrance
+    // animation finishes, then hand off to the real routing decision.
+    Future.delayed(const Duration(milliseconds: 2000), () {
+      if (mounted) widget.onDone();
+    });
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFFAF8F4),
+      body: Center(
+        child: AnimatedBuilder(
+          animation: _ctrl,
+          builder: (_, child) => Opacity(
+            opacity: _fade.value,
+            child: Transform.scale(scale: 0.75 + 0.25 * _scale.value, child: child),
+          ),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              width: 130, height: 130,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                boxShadow: [BoxShadow(color: const Color(0xFFC9A84C).withAlpha(120), blurRadius: 36, spreadRadius: 6)],
+              ),
+              child: ClipOval(child: Image.asset('assets/images/logo.png', fit: BoxFit.cover)),
+            ),
+            const SizedBox(height: 22),
+            const Text('YENEFS ABAT', style: TextStyle(fontSize: 24, color: Color(0xFF2C1810), letterSpacing: 2, fontWeight: FontWeight.w900)),
+            const SizedBox(height: 6),
+            const Text('የነፍስ አባት', style: TextStyle(fontSize: 15, color: Color(0xFFC9A84C), fontStyle: FontStyle.italic)),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════
+// CELEBRATION BURST — gold confetti + banner shown on a streak milestone
+// ═══════════════════════════════════════════════
+
+class _Particle {
+  final double angle, speed, size;
+  final Color color;
+  _Particle({required this.angle, required this.speed, required this.color, required this.size});
+}
+
+class _ConfettiPainter extends CustomPainter {
+  final List<_Particle> particles;
+  final double t; // animation progress, 0..1
+  _ConfettiPainter(this.particles, this.t);
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height * 0.42);
+    final progress = Curves.easeOut.transform(t);
+    final opacity = (1 - t).clamp(0.0, 1.0);
+    for (final p in particles) {
+      final dist = p.speed * progress;
+      final dx = math.cos(p.angle) * dist;
+      final dy = math.sin(p.angle) * dist + 60 * progress * progress; // gentle fall
+      final paint = Paint()..color = p.color.withAlpha((opacity * 255).round());
+      canvas.drawCircle(center + Offset(dx, dy), p.size * (1 - t * 0.3), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _ConfettiPainter oldDelegate) => oldDelegate.t != t;
+}
+
+class _CelebrationBurst extends StatefulWidget {
+  final String message;
+  final Color color;
+  final bool isDark;
+  final VoidCallback onDone;
+  const _CelebrationBurst({required this.message, required this.color, required this.isDark, required this.onDone});
+  @override
+  State<_CelebrationBurst> createState() => _CelebrationBurstState();
+}
+
+class _CelebrationBurstState extends State<_CelebrationBurst> with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 1600));
+  late final List<_Particle> _particles = List.generate(36, (i) {
+    final rnd = math.Random(i * 7919 + DateTime.now().millisecond);
+    final colors = [widget.color, const Color(0xFFFFD700), const Color(0xFFFFF3C4), Colors.white];
+    return _Particle(
+      angle: rnd.nextDouble() * 2 * math.pi,
+      speed: 80 + rnd.nextDouble() * 140,
+      color: colors[rnd.nextInt(colors.length)],
+      size: 4 + rnd.nextDouble() * 5,
+    );
+  });
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl.forward().whenComplete(widget.onDone);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: AnimatedBuilder(
+        animation: _ctrl,
+        builder: (_, _) {
+          final bannerOpacity = Curves.easeOut.transform((1 - (_ctrl.value - 0.15).abs() / 0.5).clamp(0.0, 1.0)).clamp(0.0, 1.0);
+          final bannerScale = 0.6 + 0.4 * Curves.easeOutBack.transform(math.min(1, _ctrl.value / 0.35));
+          return Stack(children: [
+            Positioned.fill(child: CustomPaint(painter: _ConfettiPainter(_particles, _ctrl.value))),
+            Center(
+              child: Opacity(
+                opacity: bannerOpacity,
+                child: Transform.scale(
+                  scale: bannerScale,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
+                    decoration: BoxDecoration(
+                      color: widget.isDark ? const Color(0xFF1E0A0A) : Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: widget.color, width: 1.5),
+                      boxShadow: [BoxShadow(color: widget.color.withAlpha(120), blurRadius: 24, spreadRadius: 2)],
+                    ),
+                    child: Text(widget.message, textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900, color: widget.isDark ? const Color(0xFFE8D5A0) : const Color(0xFF2C1810))),
+                  ),
+                ),
+              ),
+            ),
+          ]);
+        },
+      ),
+    );
+  }
+}
+
+void celebrateMilestone(BuildContext context, {required String message, required Color color, required bool isDark}) {
+  final overlay = Overlay.of(context);
+  late OverlayEntry entry;
+  entry = OverlayEntry(builder: (_) => _CelebrationBurst(message: message, color: color, isDark: isDark, onDone: () => entry.remove()));
+  overlay.insert(entry);
+}
+
+// ═══════════════════════════════════════════════
+// ACHIEVEMENTS
+// ═══════════════════════════════════════════════
+
+class Achievement {
+  final String id;
+  final String emoji;
+  final String titleEn;
+  final String titleAm;
+  final String hint;
+  const Achievement({required this.id, required this.emoji, required this.titleEn, required this.titleAm, required this.hint});
+}
+
+const List<Achievement> allAchievements = [
+  Achievement(id: 'first_confession', emoji: '✝️', titleEn: 'First Confession Logged', titleAm: 'የመጀመሪያ ንስሐ', hint: 'Log a confession from Home'),
+  Achievement(id: 'streak_7', emoji: '🔥', titleEn: '7 Days Faithful', titleAm: '፯ ቀናት ታማኝነት', hint: 'Check in 7 days in a row'),
+  Achievement(id: 'streak_30', emoji: '🔥', titleEn: '30 Days Faithful', titleAm: '፴ ቀናት ታማኝነት', hint: 'Check in 30 days in a row'),
+  Achievement(id: 'streak_100', emoji: '👑', titleEn: '100 Days Faithful', titleAm: '፻ ቀናት ታማኝነት', hint: 'Check in 100 days in a row'),
+  Achievement(id: 'first_prayer', emoji: '🙏', titleEn: 'First Prayer', titleAm: 'የመጀመሪያ ጸሎት', hint: 'Set a daily prayer reminder on Home'),
+  Achievement(id: 'calendar_explorer', emoji: '📅', titleEn: 'Calendar Explorer', titleAm: 'የቀን መቁጠሪያ አሳሽ', hint: 'Open the Orthodox calendar'),
+  Achievement(id: 'found_church', emoji: '⛪', titleEn: 'Found a Church', titleAm: 'ቤተ ክርስቲያን አገኙ', hint: 'Find a church on the map'),
+];
+
+/// Marks [id] unlocked if it wasn't already. Returns true only the first
+/// time — callers use that to decide whether to show the toast.
+Future<bool> unlockAchievement(String id) async {
+  final prefs = await SharedPreferences.getInstance();
+  final unlocked = (prefs.getStringList('achievements_unlocked') ?? []).toSet();
+  if (unlocked.contains(id)) return false;
+  unlocked.add(id);
+  await prefs.setStringList('achievements_unlocked', unlocked.toList());
+  return true;
+}
+
+void _showAchievementToast(BuildContext context, Achievement a, bool isDark) {
+  final c = AppColors(isDark);
+  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+    backgroundColor: c.card,
+    duration: const Duration(seconds: 4),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: c.gold, width: 1)),
+    content: Row(children: [
+      Text(a.emoji, style: const TextStyle(fontSize: 22)),
+      const SizedBox(width: 10),
+      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('Achievement Unlocked!', style: TextStyle(color: c.gold, fontWeight: FontWeight.w800, fontSize: 12)),
+        Text(a.titleEn, style: TextStyle(color: c.text, fontWeight: FontWeight.w700, fontSize: 13)),
+      ])),
+    ]),
+  ));
+}
+
+/// Unlock + toast in one call; safe to call from anywhere an achievement
+/// might already be unlocked — it's a no-op in that case.
+Future<void> maybeUnlockAchievement(BuildContext context, String id, bool isDark) async {
+  final isNew = await unlockAchievement(id);
+  if (isNew && context.mounted) {
+    _showAchievementToast(context, allAchievements.firstWhere((a) => a.id == id), isDark);
+  }
+}
+
+// ═══════════════════════════════════════════════
+// VERSE OF THE DAY — የዕለቱ ቃል
+// ═══════════════════════════════════════════════
+
+class VerseOfDay {
+  final String textEn, textAm, refEn, refAm;
+  const VerseOfDay({required this.textEn, required this.textAm, required this.refEn, required this.refAm});
+}
+
+const List<VerseOfDay> dailyVerses = [
+  VerseOfDay(textEn: 'The Lord is my shepherd; I shall not want.', textAm: 'እግዚአብሔር እረኛዬ ነው፤ የሚያሳጣኝም የለም።', refEn: 'Psalm 23:1', refAm: 'መዝሙር ፳፫፥፩'),
+  VerseOfDay(textEn: 'For God so loved the world, that he gave his only begotten Son, that whosoever believeth in him should not perish, but have everlasting life.', textAm: 'እግዚአብሔር ዓለሙን እንዲሁ ወዶአልና አንድያ ልጁን ሰጠ፥ በእርሱ የሚያምን ሁሉ የዘላለም ሕይወት እንዲኖረው እንጂ እንዳይጠፋ።', refEn: 'John 3:16', refAm: 'ዮሐንስ ፫፥፲፮'),
+  VerseOfDay(textEn: 'I can do all things through Christ which strengtheneth me.', textAm: 'ኃይልን በሚሰጠኝ በክርስቶስ ሁሉን እችላለሁ።', refEn: 'Philippians 4:13', refAm: 'ፊልጵስዩስ ፬፥፲፫'),
+  VerseOfDay(textEn: 'Trust in the Lord with all thine heart; and lean not unto thine own understanding.', textAm: 'በፍጹም ልብህ በእግዚአብሔር ታመን፤ በራስህም ማስተዋል አትደገፍ።', refEn: 'Proverbs 3:5', refAm: 'ምሳሌ ፫፥፭'),
+  VerseOfDay(textEn: 'Be still, and know that I am God.', textAm: 'ዝም በሉ፥ እኔም አምላክ እንደ ሆንሁ እወቁ።', refEn: 'Psalm 46:10', refAm: 'መዝሙር ፵፮፥፲'),
+  VerseOfDay(textEn: 'Come unto me, all ye that labour and are heavy laden, and I will give you rest.', textAm: 'እናንተ ደካሞች ሸክማችሁ የከበደ ሁሉ፥ ወደ እኔ ኑ፥ እኔም አሳርፋችኋለሁ።', refEn: 'Matthew 11:28', refAm: 'ማቴዎስ ፲፩፥፳፰'),
+  VerseOfDay(textEn: 'Rejoice in the Lord always: and again I say, Rejoice.', textAm: 'ሁልጊዜ በጌታ ደስ ይበላችሁ፤ ደግሜም እላለሁ ደስ ይበላችሁ።', refEn: 'Philippians 4:4', refAm: 'ፊልጵስዩስ ፬፥፬'),
+  VerseOfDay(textEn: 'The Lord is my light and my salvation; whom shall I fear?', textAm: 'እግዚአብሔር ብርሃኔና መድኃኒቴ ነው፤ የማንን ፈራለሁ?', refEn: 'Psalm 27:1', refAm: 'መዝሙር ፳፯፥፩'),
+  VerseOfDay(textEn: 'Ask, and it shall be given you; seek, and ye shall find; knock, and it shall be opened unto you.', textAm: 'ለምኑ ይሰጣችሁማል፤ ፈልጉ ታገኙማላችሁ፤ አንኳኩ ይከፈትላችሁማል።', refEn: 'Matthew 7:7', refAm: 'ማቴዎስ ፯፥፯'),
+  VerseOfDay(textEn: 'Love is patient, love is kind. It does not envy, it does not boast, it is not proud.', textAm: 'ፍቅር ይታገሣል፥ ቸርነትንም ያደርጋል፤ ፍቅር አይቀናም፤ ፍቅር አይመካም፥ አይታበይም።', refEn: '1 Corinthians 13:4', refAm: '፩ ቆሮንቶስ ፲፫፥፬'),
+  VerseOfDay(textEn: 'Draw nigh to God, and he will draw nigh to you.', textAm: 'ወደ እግዚአብሔር ቅረቡ እርሱም ወደ እናንተ ይቀርባል።', refEn: 'James 4:8', refAm: 'ያዕቆብ ፬፥፰'),
+  VerseOfDay(textEn: 'Weeping may endure for a night, but joy cometh in the morning.', textAm: 'እንባ በማታ ያድራል፥ ደስታ ግን በማለዳ ይመጣል።', refEn: 'Psalm 30:5', refAm: 'መዝሙር ፴፥፭'),
+  VerseOfDay(textEn: 'The fear of the Lord is the beginning of wisdom.', textAm: 'የጥበብ መጀመሪያ እግዚአብሔርን መፍራት ነው።', refEn: 'Proverbs 9:10', refAm: 'ምሳሌ ፱፥፲'),
+  VerseOfDay(textEn: 'Let all that you do be done in love.', textAm: 'ሁሉ በፍቅር ይሁንላችሁ።', refEn: '1 Corinthians 16:14', refAm: '፩ ቆሮንቶስ ፲፮፥፲፬'),
+  VerseOfDay(textEn: 'Blessed are the pure in heart: for they shall see God.', textAm: 'ልበ ንጹሖች ብፁዓን ናቸው፥ እግዚአብሔርን ያዩታልና።', refEn: 'Matthew 5:8', refAm: 'ማቴዎስ ፭፥፰'),
+  VerseOfDay(textEn: 'My grace is sufficient for thee: for my strength is made perfect in weakness.', textAm: 'ጸጋዬ ይበቃሃል፤ ኃይሌ በድካም ይፈጸማልና።', refEn: '2 Corinthians 12:9', refAm: '፪ ቆሮንቶስ ፲፪፥፱'),
+  VerseOfDay(textEn: 'Cast thy burden upon the Lord, and he shall sustain thee.', textAm: 'መከራህን በእግዚአብሔር ላይ ጣል፥ እርሱም ይደግፍሃል።', refEn: 'Psalm 55:22', refAm: 'መዝሙር ፶፭፥፳፪'),
+  VerseOfDay(textEn: 'A soft answer turneth away wrath: but grievous words stir up anger.', textAm: 'ልዝብ መልስ ቁጣን ያበርዳል፤ ክፉ ቃል ግን ቁጣን ያስነሣል።', refEn: 'Proverbs 15:1', refAm: 'ምሳሌ ፲፭፥፩'),
+  VerseOfDay(textEn: 'The Lord is near unto them that are of a broken heart.', textAm: 'እግዚአብሔር ልባቸው ለተሰበረ ቅርብ ነው።', refEn: 'Psalm 34:18', refAm: 'መዝሙር ፴፬፥፲፰'),
+  VerseOfDay(textEn: 'Watch and pray, that ye enter not into temptation.', textAm: 'ወደ ፈተና እንዳትገቡ ትጉና ጸልዩ።', refEn: 'Matthew 26:41', refAm: 'ማቴዎስ ፳፮፥፵፩'),
+  VerseOfDay(textEn: 'Give thanks in all circumstances; for this is the will of God in Christ Jesus for you.', textAm: 'በሁሉ ደስ ይበላችሁ፤ ይህ በክርስቶስ ኢየሱስ ስለ እናንተ የእግዚአብሔር ፈቃድ ነውና።', refEn: '1 Thessalonians 5:18', refAm: '፩ ተሰሎንቄ ፭፥፲፰'),
+  VerseOfDay(textEn: 'He that dwelleth in the secret place of the most High shall abide under the shadow of the Almighty.', textAm: 'በልዑል ጥላ ሥር የሚኖር በሁሉን በሚችል ጥላ ሥር ያድራል።', refEn: 'Psalm 91:1', refAm: 'መዝሙር ፺፩፥፩'),
+  VerseOfDay(textEn: 'Humble yourselves therefore under the mighty hand of God.', textAm: 'እንግዲህ ከኃያሉ ከእግዚአብሔር እጅ በታች ራሳችሁን አዋርዱ።', refEn: '1 Peter 5:6', refAm: '፩ ጴጥሮስ ፭፥፮'),
+  VerseOfDay(textEn: 'The prayer of a righteous man availeth much.', textAm: 'የጻድቅ ጸሎት እጅግ ኃይል ታደርጋለች።', refEn: 'James 5:16', refAm: 'ያዕቆብ ፭፥፲፮'),
+  VerseOfDay(textEn: 'A saying of the Desert Fathers: "Give blood, and receive the Spirit."', textAm: 'የበረሓ አበው ብሂል፦ "ደምህን ስጥ፥ መንፈስንም ተቀበል።"', refEn: 'Sayings of the Desert Fathers', refAm: 'ብሂለ አበው'),
+  VerseOfDay(textEn: 'Abba Anthony said: "Whoever has not experienced temptation cannot enter into the Kingdom of Heaven."', textAm: 'አባ እንጦንስ አለ፦ "ፈተናን ያላየ ወደ መንግሥተ ሰማያት ሊገባ አይችልም።"', refEn: 'Sayings of the Desert Fathers', refAm: 'ብሂለ አበው'),
+  VerseOfDay(textEn: 'Let the peace of God rule in your hearts, and be ye thankful.', textAm: 'የእግዚአብሔር ሰላም በልባችሁ ይግዛ፥ አመስጋኞችም ሁኑ።', refEn: 'Colossians 3:15', refAm: 'ቆላስይስ ፫፥፲፭'),
+];
+
+VerseOfDay verseForToday() {
+  final now = DateTime.now();
+  final dayOfYear = now.difference(DateTime(now.year, 1, 1)).inDays;
+  return dailyVerses[dayOfYear % dailyVerses.length];
+}
+
+// ═══════════════════════════════════════════════
 // APP
 // ═══════════════════════════════════════════════
 
@@ -493,6 +772,7 @@ class _YenefsAbatAppState extends State<YenefsAbatApp> {
   UserProfile? _profile;
   bool _needsLogin = false;
   bool _showOnboarding = false;
+  bool _showSplash = true;
 
   @override
   void initState() {
@@ -576,19 +856,29 @@ class _YenefsAbatAppState extends State<YenefsAbatApp> {
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFFC9A84C)),
         useMaterial3: true,
         fontFamily: 'NotoSansEthiopic',
+        pageTransitionsTheme: const PageTransitionsTheme(builders: {
+          TargetPlatform.android: FadeUpwardsPageTransitionsBuilder(),
+          TargetPlatform.iOS: FadeUpwardsPageTransitionsBuilder(),
+        }),
       ),
       darkTheme: ThemeData.dark().copyWith(
         scaffoldBackgroundColor: const Color(0xFF0F0505),
         colorScheme: const ColorScheme.dark(primary: Color(0xFFC4A55A)),
+        pageTransitionsTheme: const PageTransitionsTheme(builders: {
+          TargetPlatform.android: FadeUpwardsPageTransitionsBuilder(),
+          TargetPlatform.iOS: FadeUpwardsPageTransitionsBuilder(),
+        }),
       ),
       themeMode: _isDark ? ThemeMode.dark : ThemeMode.light,
-      home: !_profileLoaded
-          ? const Scaffold(body: Center(child: CircularProgressIndicator()))
-          : _showOnboarding
-              ? OnboardingScreen(isDark: _isDark, onFinish: _finishOnboarding)
-              : _profile == null || _needsLogin
-                  ? SignInScreen(onSaved: _onProfileSaved, isDark: _isDark)
-                  : MainScreen(isDark: _isDark, onToggleTheme: _toggleTheme, profile: _profile!),
+      home: _showSplash
+          ? SplashScreen(onDone: () => setState(() => _showSplash = false))
+          : !_profileLoaded
+              ? const Scaffold(body: Center(child: CircularProgressIndicator()))
+              : _showOnboarding
+                  ? OnboardingScreen(isDark: _isDark, onFinish: _finishOnboarding)
+                  : _profile == null || _needsLogin
+                      ? SignInScreen(onSaved: _onProfileSaved, isDark: _isDark)
+                      : MainScreen(isDark: _isDark, onToggleTheme: _toggleTheme, profile: _profile!),
       builder: (context, child) => ValueListenableBuilder<double>(
         valueListenable: fontSizeNotifier,
         builder: (context, scale, _) => MediaQuery(
@@ -1306,12 +1596,17 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       backgroundColor: AppColors(widget.isDark).card,
       duration: const Duration(seconds: 3),
     ));
+    if (newStreak == 7 || newStreak == 30 || newStreak == 100) {
+      celebrateMilestone(context, message: msg, color: AppColors(widget.isDark).gold, isDark: widget.isDark);
+      await maybeUnlockAchievement(context, 'streak_$newStreak', widget.isDark);
+    }
   }
 
   Future<void> _savePrayerTime(String key, String time, int notifId, String label) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(key, time);
     if (time.isNotEmpty) {
+      if (mounted) await maybeUnlockAchievement(context, 'first_prayer', widget.isDark);
       final parts = time.split(':');
       await schedulePrayerNotification(notifId, int.parse(parts[0]), int.parse(parts[1]), label);
     } else {
@@ -1394,6 +1689,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       backgroundColor: AppColors(widget.isDark).card,
       duration: const Duration(seconds: 3),
     ));
+    await maybeUnlockAchievement(context, 'first_confession', widget.isDark);
   }
 
   @override
@@ -1424,6 +1720,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               _hero(c), _dateStrip(c),
               _streakCard(c),
+              _label('VERSE OF THE DAY', c), _verseCard(c),
               _label('TODAY\'S SAINT', c), _saintCard(c),
               _label('PRAYER REMINDERS', c), _prayerSection(c),
               _label('CONFESSION', c), _confCard(c),
@@ -1534,6 +1831,36 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     ]),
   );
 
+  Widget _verseCard(AppColors c) {
+    final verse = verseForToday();
+    return Container(
+      margin: const EdgeInsets.fromLTRB(14, 0, 14, 0),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [c.goldBg, c.card]),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: c.gold, width: 1),
+        boxShadow: [BoxShadow(color: Colors.black.withAlpha(10), blurRadius: 8, offset: const Offset(0, 2))],
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Text('የዕለቱ ቃል', style: TextStyle(fontSize: 12, color: c.gold, fontWeight: FontWeight.w800, letterSpacing: 0.5)),
+          const Spacer(),
+          GestureDetector(
+            onTap: () => Share.share('${verse.textAm}\n\n${verse.textEn}\n\n— ${verse.refAm} / ${verse.refEn}'),
+            child: Icon(Icons.ios_share_rounded, color: c.gold, size: 18),
+          ),
+        ]),
+        const SizedBox(height: 10),
+        Text('"${verse.textAm}"', style: TextStyle(fontSize: 14, color: c.text, height: 1.6, fontStyle: FontStyle.italic)),
+        const SizedBox(height: 6),
+        Text('"${verse.textEn}"', style: TextStyle(fontSize: 12.5, color: c.muted, height: 1.5, fontStyle: FontStyle.italic)),
+        const SizedBox(height: 8),
+        Text('— ${verse.refAm} / ${verse.refEn}', style: TextStyle(fontSize: 11, color: c.gold, fontWeight: FontWeight.w600)),
+      ]),
+    );
+  }
+
   Widget _streakCard(AppColors c) {
     final flameColor = _streak >= 30 ? const Color(0xFFFF6B35) : _streak >= 7 ? const Color(0xFFFFA726) : c.gold;
     return Container(
@@ -1564,7 +1891,14 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         const SizedBox(width: 14),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(crossAxisAlignment: CrossAxisAlignment.baseline, textBaseline: TextBaseline.alphabetic, children: [
-            Text('$_streak', style: TextStyle(fontSize: 26, color: c.text, fontWeight: FontWeight.w900)),
+            TweenAnimationBuilder<double>(
+              key: ValueKey(_streak),
+              tween: Tween(begin: 1.4, end: 1.0),
+              duration: const Duration(milliseconds: 450),
+              curve: Curves.elasticOut,
+              builder: (_, scale, child) => Transform.scale(scale: scale, child: child),
+              child: Text('$_streak', style: TextStyle(fontSize: 26, color: c.text, fontWeight: FontWeight.w900)),
+            ),
             const SizedBox(width: 6),
             Text(_streak == 1 ? 'day streak' : 'day streak', style: TextStyle(fontSize: 13, color: c.muted, fontWeight: FontWeight.w600)),
           ]),
@@ -4430,6 +4764,9 @@ class _CalendarScreenState extends State<CalendarScreen> with SingleTickerProvid
     _viewYear = _today.year;
     _selectedDay = _today.day;
     _tabController = TabController(length: 2, vsync: this);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) maybeUnlockAchievement(context, 'calendar_explorer', widget.isDark);
+    });
   }
 
   @override
@@ -5697,6 +6034,7 @@ class _PriestScreenState extends State<PriestScreen> with TickerProviderStateMix
   void _selectPlace(Map<String, dynamic> p) {
     if (_sel != null && _sel!['place_id'] != p['place_id']) _clearRoute();
     setState(() => _sel = p);
+    maybeUnlockAchievement(context, 'found_church', widget.isDark);
     _flyTo(LatLng(p['lat'] as double, p['lng'] as double), math.max(_zoom, 15.5));
   }
 
@@ -6953,6 +7291,14 @@ class _MoreScreenState extends State<MoreScreen> {
               ]),
             ),
           ]),
+          _sectionLabel('SPIRITUAL LIFE', c),
+          _settingsCard(c, children: [
+            _actionRow('Achievements', Icons.emoji_events_outlined, c, c.gold, () => Navigator.push(context, MaterialPageRoute(
+              builder: (_) => AchievementsScreen(isDark: widget.isDark)))),
+            Divider(color: c.border, height: 0.5),
+            _actionRow('Support Yenefs Abat', Icons.favorite_outline, c, c.gold, () => Navigator.push(context, MaterialPageRoute(
+              builder: (_) => SupportUsScreen(isDark: widget.isDark)))),
+          ]),
           _sectionLabel('DISPLAY', c),
           _settingsCard(c, children: [
             Padding(
@@ -7140,6 +7486,9 @@ class _FastingTrackerScreenState extends State<FastingTrackerScreen> {
       backgroundColor: AppColors(widget.isDark).card,
       duration: const Duration(seconds: 3),
     ));
+    if (newStreak == 7 || newStreak == 40 || newStreak == 100) {
+      celebrateMilestone(context, message: msg, color: AppColors(widget.isDark).gold, isDark: widget.isDark);
+    }
   }
 
   String _fmt(DateTime d) {
@@ -7448,5 +7797,186 @@ class _ShareCardScreenState extends State<ShareCardScreen> {
         style: TextStyle(fontSize: 12.5, color: c.muted, height: 1.6)),
     ],
   ]));
+}
+
+// ═══════════════════════════════════════════════
+// ACHIEVEMENTS SCREEN
+// ═══════════════════════════════════════════════
+
+class AchievementsScreen extends StatefulWidget {
+  final bool isDark;
+  const AchievementsScreen({super.key, required this.isDark});
+  @override
+  State<AchievementsScreen> createState() => _AchievementsScreenState();
+}
+
+class _AchievementsScreenState extends State<AchievementsScreen> {
+  Set<String> _unlocked = {};
+  bool _loaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _unlocked = (prefs.getStringList('achievements_unlocked') ?? []).toSet();
+      _loaded = true;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppColors(widget.isDark);
+    return Scaffold(
+      backgroundColor: c.bg,
+      body: SafeArea(child: Column(children: [
+        Container(
+          color: c.hero, padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+          child: Row(children: [
+            GestureDetector(onTap: () => Navigator.pop(context), child: Icon(Icons.arrow_back_ios, color: c.gold, size: 20)),
+            const SizedBox(width: 10),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('ACHIEVEMENTS', style: TextStyle(fontSize: 16, color: c.text, letterSpacing: 2, fontWeight: FontWeight.w800)),
+              if (_loaded)
+                Text('${_unlocked.length} of ${allAchievements.length} unlocked', style: TextStyle(fontSize: 11, color: c.muted)),
+            ])),
+          ]),
+        ),
+        Divider(color: c.border, height: 0.5),
+        Expanded(
+          child: !_loaded
+              ? Center(child: CircularProgressIndicator(color: c.gold))
+              : GridView.builder(
+                  padding: const EdgeInsets.all(16),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2, crossAxisSpacing: 12, mainAxisSpacing: 12, childAspectRatio: 0.92),
+                  itemCount: allAchievements.length,
+                  itemBuilder: (_, i) {
+                    final a = allAchievements[i];
+                    final unlocked = _unlocked.contains(a.id);
+                    return Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: unlocked ? c.goldBg : c.card,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: unlocked ? c.gold : c.border, width: unlocked ? 1.2 : 0.5),
+                        boxShadow: unlocked ? [BoxShadow(color: c.gold.withAlpha(70), blurRadius: 14, spreadRadius: 1)] : [],
+                      ),
+                      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                        Opacity(opacity: unlocked ? 1 : 0.35, child: Text(a.emoji, style: const TextStyle(fontSize: 36))),
+                        const SizedBox(height: 10),
+                        Text(unlocked ? a.titleEn : '???', textAlign: TextAlign.center,
+                          style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: unlocked ? c.text : c.muted)),
+                        const SizedBox(height: 4),
+                        if (unlocked)
+                          Text(a.titleAm, textAlign: TextAlign.center,
+                            style: TextStyle(fontSize: 10.5, color: c.gold, fontStyle: FontStyle.italic))
+                        else
+                          Text(a.hint, textAlign: TextAlign.center,
+                            style: TextStyle(fontSize: 10, color: c.muted, fontStyle: FontStyle.italic)),
+                      ]),
+                    );
+                  },
+                ),
+        ),
+      ])),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════
+// SUPPORT US
+// ═══════════════════════════════════════════════
+
+class SupportUsScreen extends StatelessWidget {
+  final bool isDark;
+  const SupportUsScreen({super.key, required this.isDark});
+
+  Future<void> _openGoFundMe() async {
+    final uri = Uri.parse('https://gofund.me/eea5bcece');
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppColors(isDark);
+    return Scaffold(
+      backgroundColor: c.bg,
+      body: SafeArea(child: Column(children: [
+        Container(
+          color: c.hero, padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+          child: Row(children: [
+            GestureDetector(onTap: () => Navigator.pop(context), child: Icon(Icons.arrow_back_ios, color: c.gold, size: 20)),
+            const SizedBox(width: 10),
+            Text('SUPPORT US', style: TextStyle(fontSize: 16, color: c.text, letterSpacing: 2, fontWeight: FontWeight.w800)),
+          ]),
+        ),
+        Divider(color: c.border, height: 0.5),
+        Expanded(child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Column(children: [
+            const SizedBox(height: 10),
+            Container(
+              width: 90, height: 90,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [c.goldBg, c.card]),
+                shape: BoxShape.circle, border: Border.all(color: c.gold, width: 2),
+                boxShadow: [BoxShadow(color: c.gold.withAlpha(80), blurRadius: 24, spreadRadius: 2)],
+              ),
+              child: const Center(child: Text('🙏', style: TextStyle(fontSize: 42))),
+            ),
+            const SizedBox(height: 22),
+            Text('Support Yenefs Abat', style: TextStyle(fontSize: 22, color: c.text, fontWeight: FontWeight.w900), textAlign: TextAlign.center),
+            const SizedBox(height: 4),
+            Text('የነፍስ አባትን ይደግፉ', style: TextStyle(fontSize: 14, color: c.gold, fontStyle: FontStyle.italic), textAlign: TextAlign.center),
+            const SizedBox(height: 24),
+            Container(
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(color: c.card, borderRadius: BorderRadius.circular(18), border: Border.all(color: c.border, width: 0.5)),
+              child: Column(children: [
+                Text(
+                  'Yenefs Abat is built and kept free for the Ethiopian Orthodox Tewahedo community — prayer reminders, the fasting calendar, confession guidance, and a way to find a church wherever you are. Your gift helps us keep it free, add more authentic content, and keep serving the faithful.',
+                  style: TextStyle(fontSize: 13.5, color: c.text, height: 1.7), textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 14),
+                Container(height: 0.5, color: c.border),
+                const SizedBox(height: 14),
+                Text(
+                  'Yenefs Abat ለኢትዮጵያ ኦርቶዶክስ ተዋሕዶ ቤተሰብ ነጻ ሆኖ እንዲቆይ ተደርጎ የተሠራ ነው — የጸሎት ማሳሰቢያ፣ የጾም ቀን መቁጠሪያ፣ የንስሐ መመሪያ፣ እና ወዳሉበት ቦታ ቤተ ክርስቲያን የማግኛ መንገድ። ስጦታዎ ነጻ አድርገን እንድንቀጥል፣ ተጨማሪ እውነተኛ ይዘት እንድንጨምር፣ ምዕመናኑንም ማገልገላችንን እንድንቀጥል ይረዳናል።',
+                  style: TextStyle(fontSize: 13, color: c.muted, height: 1.8), textAlign: TextAlign.center,
+                ),
+              ]),
+            ),
+            const SizedBox(height: 28),
+            GestureDetector(
+              onTap: _openGoFundMe,
+              child: Container(
+                width: double.infinity, padding: const EdgeInsets.symmetric(vertical: 16),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(colors: [Color(0xFFE3C878), Color(0xFFC9A84C), Color(0xFFA98937)]),
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [BoxShadow(color: c.gold.withAlpha(110), blurRadius: 16, offset: const Offset(0, 6))],
+                ),
+                child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                  const Icon(Icons.favorite, color: Colors.white, size: 20),
+                  const SizedBox(width: 10),
+                  Text('SUPPORT ON GOFUNDME', style: TextStyle(fontSize: 14, letterSpacing: 1.5, fontWeight: FontWeight.w800,
+                    color: isDark ? const Color(0xFF0F0505) : Colors.white)),
+                ]),
+              ),
+            ),
+            const SizedBox(height: 14),
+            Text('Every gift, big or small, is a blessing. Thank you 🙏',
+              style: TextStyle(fontSize: 12, color: c.muted, fontStyle: FontStyle.italic), textAlign: TextAlign.center),
+            const SizedBox(height: 20),
+          ]),
+        )),
+      ])),
+    );
+  }
 }
 
