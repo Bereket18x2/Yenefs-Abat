@@ -5,9 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Yenefs Abat | የነፍስ አባት — Ethiopian Orthodox Tewahedo Companion App</title>
 <meta name="description" content="Yenefs Abat (የነፍስ አባት) is a spiritual companion app for the Ethiopian Orthodox Tewahedo faith — confession guidance, prayer reminders, the Orthodox calendar, daily Synaxarium, and the nearest church, always with you.">
-<meta name="theme-color" content="#0D0B08">
+<meta name="theme-color" content="#07060a">
 
-<!-- Open Graph -->
 <meta property="og:type" content="website">
 <meta property="og:title" content="Yenefs Abat | የነፍስ አባት — Father of the Soul">
 <meta property="og:description" content="A spiritual companion app for the Ethiopian Orthodox Tewahedo faith. Confession guidance, prayer reminders, the Orthodox calendar, daily Synaxarium, and finding the nearest church.">
@@ -24,282 +23,403 @@
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700;800&family=Inter:wght@300;400;500;600;700&family=Noto+Sans+Ethiopic:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700;800;900&family=Inter:wght@300;400;500;600;700;800&family=Noto+Sans+Ethiopic:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
 <style>
-  :root{
-    --bg:#0D0B08;
-    --bg-2:#160f0a;
-    --gold:#C9A84C;
-    --gold-light:#E3C878;
-    --gold-dark:#9C7E2E;
-    --ink:#F3EADA;
-    --muted:#B8A98A;
-    --card:#17130db3;
-    --border:#C9A84C33;
-  }
-  *{box-sizing:border-box;}
-  html{scroll-behavior:smooth;}
-  body{
-    margin:0;
-    background:var(--bg);
-    color:var(--ink);
-    font-family:'Inter',sans-serif;
-    overflow-x:hidden;
-    -webkit-font-smoothing:antialiased;
-  }
-  .am{ font-family:'Noto Sans Ethiopic',sans-serif; }
-  h1,h2,h3,.serif{ font-family:'Cinzel',serif; }
-  a{color:inherit;}
-  img{max-width:100%;display:block;}
+:root{
+  --bg:#07060a;
+  --bg-1:#0c0a10;
+  --bg-2:#120e0a;
+  --ink:#F4EEE0;
+  --muted:#9C9184;
+  --muted-2:#6f665c;
+  --gold:#C9A84C;
+  --gold-light:#EFD48F;
+  --gold-dim:#8a6f34;
+  --line: #EFD48F1f;
+  --glass: linear-gradient(160deg, #ffffff0d, #ffffff02);
+  --ease: cubic-bezier(.19,1,.22,1);
+  --ease-soft: cubic-bezier(.22,.9,.28,1);
+}
+*{box-sizing:border-box;}
+html{ scroll-behavior:smooth; background:var(--bg); }
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:'Inter',sans-serif; overflow-x:clip;
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+  cursor:default;
+}
+.am{ font-family:'Noto Sans Ethiopic',sans-serif; }
+h1,h2,h3,.serif{ font-family:'Cinzel',serif; }
+a{ color:inherit; }
+img{ max-width:100%; display:block; }
+::selection{ background:var(--gold); color:#0c0a05; }
+.wrap{ max-width:1280px; margin:0 auto; padding-left:6vw; padding-right:6vw; }
 
-  ::selection{ background:var(--gold); color:#1a1206; }
+/* ── Custom cursor (desktop, fine pointer only) ── */
+.cursor-dot,.cursor-ring{ position:fixed; top:0; left:0; pointer-events:none; z-index:9999; border-radius:50%; transform:translate(-50%,-50%); }
+.cursor-dot{ width:6px; height:6px; background:var(--gold-light); box-shadow:0 0 10px #EFD48F99; }
+.cursor-ring{ width:34px; height:34px; border:1px solid #EFD48F55; transition:width .3s var(--ease-soft), height .3s var(--ease-soft), border-color .3s, background .3s; }
+.cursor-ring.is-active{ width:64px; height:64px; background:#EFD48F14; border-color:#EFD48F99; }
+@media (hover:none), (pointer:coarse){ .cursor-dot,.cursor-ring{ display:none; } body{ cursor:auto; } }
+body.cursor-active, body.cursor-active *{ cursor:none !important; }
 
-  /* ── Nav ── */
-  header.nav{
-    position:fixed; top:0; left:0; right:0; z-index:50;
-    display:flex; align-items:center; justify-content:space-between;
-    padding:18px 5vw;
-    backdrop-filter:blur(10px);
-    background:linear-gradient(to bottom, rgba(13,11,8,.85), rgba(13,11,8,0));
-    transition:background .3s;
-  }
-  header.nav .brand{ display:flex; align-items:center; gap:10px; font-family:'Cinzel',serif; letter-spacing:2px; font-size:14px; font-weight:600; color:var(--gold-light);}
-  header.nav .brand img{ width:34px; height:34px; border-radius:50%; border:1px solid var(--gold); }
-  header.nav nav a{ text-decoration:none; color:var(--muted); font-size:13px; letter-spacing:1px; margin-left:28px; transition:color .25s; }
-  header.nav nav a:hover{ color:var(--gold-light); }
-  header.nav nav{ display:flex; align-items:center; }
-  @media (max-width:640px){ header.nav nav a:not(.nav-cta){ display:none; } }
+/* ── Preloader ── */
+#preloader{
+  position:fixed; inset:0; z-index:10000; background:var(--bg);
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:22px;
+  transition:opacity .8s var(--ease), visibility .8s;
+}
+#preloader.hide{ opacity:0; visibility:hidden; pointer-events:none; }
+#preloader .mark{ width:54px; height:54px; border-radius:50%; border:1px solid #EFD48F55; display:flex; align-items:center; justify-content:center; color:var(--gold-light); font-size:22px; box-shadow:0 0 30px #C9A84C33; }
+#preloader .bar{ width:160px; height:1px; background:#EFD48F22; overflow:hidden; position:relative; }
+#preloader .bar i{ position:absolute; left:0; top:0; height:100%; width:40%; background:linear-gradient(90deg,transparent,var(--gold-light),transparent); animation:loadsweep 1.1s ease-in-out infinite; }
+@keyframes loadsweep{ 0%{ left:-40%; } 100%{ left:100%; } }
+#preloader .word{ font-family:'Cinzel',serif; font-size:11px; letter-spacing:5px; color:var(--muted); }
 
-  /* ── Hero ── */
-  .hero{
-    position:relative; min-height:100svh; display:flex; align-items:center; justify-content:center;
-    text-align:center; padding:120px 24px 80px;
-    overflow:hidden;
-  }
-  #hero-canvas{
-    position:absolute; inset:0; width:100%; height:100%; z-index:0;
-    display:block;
-  }
-  .hero::before{
-    content:''; position:absolute; inset:0;
-    background:radial-gradient(ellipse at 50% 30%, transparent 0%, rgba(13,11,8,.55) 55%, var(--bg) 100%);
-    pointer-events:none; z-index:1;
-  }
-  .hero-content{ position:relative; z-index:2; max-width:760px; }
-  .hero-logo{
-    width:96px; height:96px; border-radius:50%; margin:0 auto 22px;
-    border:1.5px solid var(--gold); box-shadow:0 0 50px #C9A84C55, 0 0 0 6px #C9A84C14;
-  }
-  .hero h1{ font-size:clamp(2.4rem, 6.5vw, 4.4rem); margin:0 0 6px; color:#fff; letter-spacing:3px; font-weight:700;
-    text-shadow:0 0 40px #C9A84C55; }
-  .hero h1 .split-char{ display:inline-block; }
-  .hero .am-title{ font-size:clamp(1.4rem, 4vw, 2.2rem); color:var(--gold-light); margin:0 0 22px; font-weight:600;}
-  .hero .divider{ width:60px; height:2px; background:linear-gradient(90deg,transparent,var(--gold),transparent); margin:20px auto; }
-  .hero p.tagline{ font-size:clamp(1rem,2.4vw,1.2rem); color:var(--muted); line-height:1.8; margin:0 auto 8px; max-width:560px; }
-  .hero p.tagline.am{ font-size:clamp(1.05rem,2.6vw,1.3rem); color:#E8D9B8; margin-bottom:34px; }
+/* ── Nav ── */
+header.nav{
+  position:fixed; top:0; left:0; right:0; z-index:100;
+  display:flex; align-items:center; justify-content:space-between;
+  padding:22px 6vw; transition:padding .4s var(--ease-soft), background .4s, border-color .4s;
+  border-bottom:1px solid transparent;
+}
+header.nav.solid{ padding:14px 6vw; background:#07060ae6; backdrop-filter:blur(16px); border-color:var(--line); }
+.brand{ display:flex; align-items:center; gap:12px; font-family:'Cinzel',serif; letter-spacing:3px; font-size:13px; font-weight:600; color:var(--ink); text-decoration:none; }
+.brand img{ width:32px; height:32px; border-radius:50%; border:1px solid var(--gold); }
+.nav-links{ display:flex; align-items:center; gap:44px; }
+.nav-links a{ position:relative; text-decoration:none; color:var(--muted); font-size:12.5px; letter-spacing:1.5px; text-transform:uppercase; padding:4px 0; }
+.nav-links a:not(.nav-cta)::after{ content:''; position:absolute; left:0; bottom:-2px; width:0; height:1px; background:var(--gold-light); transition:width .35s var(--ease-soft); }
+.nav-links a:not(.nav-cta):hover{ color:var(--ink); }
+.nav-links a:not(.nav-cta):hover::after{ width:100%; }
+.nav-cta{ border:1px solid var(--line); border-radius:100px; padding:10px 20px !important; font-weight:600; color:var(--gold-light) !important; }
+.nav-cta:hover{ background:#EFD48F12; border-color:#EFD48F66; }
+.nav-burger{ display:none; width:40px; height:40px; border-radius:50%; border:1px solid var(--line); align-items:center; justify-content:center; background:none; cursor:pointer; }
+.nav-burger span{ display:block; width:15px; height:1px; background:var(--ink); position:relative; transition:transform .3s, opacity .3s; }
+.nav-burger span::before,.nav-burger span::after{ content:''; position:absolute; left:0; width:100%; height:1px; background:var(--ink); transition:transform .3s var(--ease-soft), top .3s; }
+.nav-burger span::before{ top:-5px; }
+.nav-burger span::after{ top:5px; }
+.nav-burger.open span{ background:transparent; }
+.nav-burger.open span::before{ top:0; transform:rotate(45deg); }
+.nav-burger.open span::after{ top:0; transform:rotate(-45deg); }
 
-  .btn-row{ display:flex; gap:16px; justify-content:center; flex-wrap:wrap; }
-  .btn{
-    font-family:'Inter',sans-serif; font-weight:600; font-size:14px; letter-spacing:1px;
-    padding:16px 32px; border-radius:14px; cursor:pointer; border:none;
-    text-decoration:none; display:inline-flex; align-items:center; gap:8px;
-    transition:transform .25s cubic-bezier(.2,.9,.3,1.3), box-shadow .25s;
-  }
-  .btn-gold{ background:linear-gradient(135deg,var(--gold-light),var(--gold),var(--gold-dark)); color:#1a1206; box-shadow:0 8px 30px #C9A84C40;}
-  .btn-gold:hover{ transform:translateY(-3px) scale(1.02); box-shadow:0 14px 40px #C9A84C66; }
-  .btn-ghost{ background:transparent; color:var(--gold-light); border:1px solid var(--border); }
-  .btn-ghost:hover{ background:#C9A84C14; transform:translateY(-3px); }
+.mobile-menu{
+  position:fixed; inset:0; z-index:90; background:#07060af5; backdrop-filter:blur(20px);
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:28px;
+  opacity:0; visibility:hidden; transition:opacity .5s var(--ease), visibility .5s;
+}
+.mobile-menu.open{ opacity:1; visibility:visible; }
+.mobile-menu a{ font-family:'Cinzel',serif; font-size:22px; letter-spacing:2px; color:var(--ink); text-decoration:none; opacity:0; transform:translateY(16px); transition:opacity .5s var(--ease-soft), transform .5s var(--ease-soft); }
+.mobile-menu.open a{ opacity:1; transform:translateY(0); }
 
-  .scroll-cue{ position:absolute; bottom:28px; left:50%; transform:translateX(-50%); z-index:2; color:var(--muted); font-size:11px; letter-spacing:3px; opacity:.7;}
-  .scroll-cue span{ display:block; width:1px; height:34px; background:linear-gradient(var(--gold),transparent); margin:10px auto 0; animation:scrollpulse 2s ease-in-out infinite; }
-  @keyframes scrollpulse{ 0%,100%{opacity:.2;} 50%{opacity:1;} }
+@media (max-width:860px){
+  .nav-links{ display:none; }
+  .nav-burger{ display:flex; }
+}
 
-  /* ── Scripture strip ── */
-  .scripture{
-    position:relative; padding:70px 24px; text-align:center;
-    background:linear-gradient(180deg,var(--bg),var(--bg-2));
-    border-top:1px solid var(--border); border-bottom:1px solid var(--border);
-  }
-  .scripture .cross-mark{ font-size:28px; color:var(--gold); margin-bottom:18px; }
-  .scripture blockquote{ margin:0 auto 10px; max-width:680px; font-family:'Cinzel',serif; font-style:italic;
-    font-size:clamp(1.1rem,2.6vw,1.5rem); color:var(--gold-light); line-height:1.7; font-weight:500;}
-  .scripture .am{ max-width:680px; margin:0 auto 18px; font-size:clamp(1.1rem,2.8vw,1.5rem); color:#fff; line-height:1.9;}
-  .scripture cite{ font-style:normal; color:var(--muted); font-size:13px; letter-spacing:1px;}
+/* ── Hero ── */
+.hero{ position:relative; min-height:100svh; display:flex; align-items:flex-end; overflow:hidden; }
+#hero-canvas{ position:absolute; inset:0; width:100%; height:100%; z-index:0; }
+.hero::before{ content:''; position:absolute; inset:0; z-index:1; pointer-events:none;
+  background:
+    radial-gradient(ellipse 60% 50% at 72% 30%, #C9A84C1c, transparent 60%),
+    radial-gradient(ellipse 90% 70% at 50% 100%, var(--bg) 20%, transparent 70%);
+}
+.hero::after{ content:''; position:absolute; inset:0; z-index:1; pointer-events:none;
+  background:linear-gradient(180deg, #07060a55 0%, transparent 18%, transparent 70%, var(--bg) 100%); }
+.hero-grid{ position:relative; z-index:2; width:100%; padding:min(190px,22vh) 6vw 90px; display:grid; grid-template-columns:1.4fr .6fr; gap:40px; align-items:end; }
+.hero-eyebrow{ display:flex; align-items:center; gap:10px; color:var(--gold-light); font-size:12px; letter-spacing:4px; text-transform:uppercase; margin-bottom:26px; }
+.hero-eyebrow .dot{ width:5px; height:5px; border-radius:50%; background:var(--gold-light); box-shadow:0 0 8px var(--gold-light); }
+.hero h1{ margin:0; font-size:clamp(3rem,8.4vw,7.4rem); line-height:.98; letter-spacing:-1px; font-weight:700; color:#fff; }
+.hero h1 .line{ display:block; overflow:hidden; }
+.hero h1 .split-char{ display:inline-block; }
+.hero .am-title{ font-size:clamp(1.5rem,3.4vw,2.3rem); color:var(--gold-light); margin:14px 0 0; font-weight:600; }
+.hero-side{ text-align:right; }
+.hero-side p{ color:var(--muted); font-size:15px; line-height:1.8; margin:0 0 28px; max-width:320px; margin-left:auto; }
+.hero-side p.am{ color:#E4D3AE; font-size:16px; }
+.btn-row{ display:flex; gap:14px; justify-content:flex-end; flex-wrap:wrap; }
+@media (max-width:960px){
+  .hero-grid{ grid-template-columns:1fr; }
+  .hero-side{ text-align:left; }
+  .hero-side p{ margin-left:0; }
+  .btn-row{ justify-content:flex-start; }
+}
 
-  /* ── Section shell ── */
-  section{ padding:110px 6vw; position:relative; }
-  .eyebrow{ text-align:center; color:var(--gold); letter-spacing:4px; font-size:12px; font-weight:600; margin-bottom:14px; text-transform:uppercase;}
-  .section-title{ text-align:center; font-size:clamp(1.8rem,4vw,2.6rem); color:#fff; margin:0 0 6px;}
-  .section-title-am{ text-align:center; color:var(--gold-light); font-size:clamp(1.1rem,2.6vw,1.5rem); margin:0 0 60px; font-weight:500;}
+.btn{
+  font-family:'Inter',sans-serif; font-weight:600; font-size:13.5px; letter-spacing:.5px;
+  padding:17px 30px; border-radius:100px; cursor:pointer; border:1px solid transparent;
+  text-decoration:none; display:inline-flex; align-items:center; gap:10px; position:relative;
+  will-change:transform;
+}
+.btn-gold{ background:linear-gradient(135deg,var(--gold-light),var(--gold)); color:#1a1206; box-shadow:0 10px 30px -6px #C9A84C55; }
+.btn-gold:hover{ box-shadow:0 16px 40px -6px #C9A84C88; }
+.btn-ghost{ background:#EFD48F0a; color:var(--ink); border-color:var(--line); backdrop-filter:blur(6px); }
+.btn-ghost:hover{ background:#EFD48F16; border-color:#EFD48F55; }
+.btn-icon{ transition:transform .4s var(--ease-soft); }
+.btn:hover .btn-icon{ transform:translateX(4px); }
 
-  /* ── Features ── */
-  .features-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:26px; max-width:1200px; margin:0 auto; }
-  .feature-card{
-    position:relative; padding:34px 28px; border-radius:22px;
-    background:linear-gradient(160deg, #1c150ccc, #100c07cc);
-    border:1px solid var(--border);
-    backdrop-filter:blur(6px);
-    transform-style:preserve-3d; will-change:transform;
-    transition:border-color .3s, box-shadow .3s;
-    opacity:0; transform:translateY(40px);
-  }
-  .feature-card:hover{ border-color:#C9A84C88; box-shadow:0 20px 60px #00000066, 0 0 40px #C9A84C22; }
-  .feature-card .icon{ font-size:34px; margin-bottom:18px; display:inline-block; filter:drop-shadow(0 0 14px #C9A84C55); }
-  .feature-card h3{ margin:0 0 4px; font-size:1.15rem; color:#fff; font-weight:600; font-family:'Inter',sans-serif; }
-  .feature-card h3 + .am{ color:var(--gold-light); font-size:1rem; margin-bottom:14px; display:block; }
-  .feature-card p{ color:var(--muted); font-size:14px; line-height:1.7; margin:0; }
+.scroll-cue{ position:absolute; right:6vw; bottom:34px; z-index:2; display:flex; align-items:center; gap:12px; color:var(--muted-2); font-size:10px; letter-spacing:3px; writing-mode:vertical-rl; }
+.scroll-cue .stem{ width:1px; height:52px; background:linear-gradient(var(--gold),transparent); }
+@media (max-width:860px){ .scroll-cue{ display:none; } }
 
-  /* ── App preview ── */
-  .preview-wrap{ display:flex; align-items:center; justify-content:center; gap:72px; flex-wrap:wrap; max-width:1100px; margin:0 auto; }
-  .phone-stage{ perspective:1400px; }
-  .phone{
-    width:260px; height:540px; border-radius:42px; padding:12px;
-    background:linear-gradient(155deg,#2a2015,#0d0906);
-    border:1px solid #C9A84C55;
-    box-shadow:0 40px 80px -20px #000000aa, 0 0 60px #C9A84C22, inset 0 0 0 1px #ffffff08;
-    transform:rotateY(-18deg) rotateX(4deg);
-    transition:transform .6s cubic-bezier(.2,.9,.2,1);
-  }
-  .phone-stage:hover .phone{ transform:rotateY(-6deg) rotateX(1deg); }
-  .phone .screen{
-    width:100%; height:100%; border-radius:32px; overflow:hidden; position:relative;
-    background:radial-gradient(circle at 50% 0%, #241a10, #0c0906 70%);
-    display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:24px;
-  }
-  .phone .screen img{ width:64px; height:64px; border-radius:50%; margin-bottom:16px; border:1px solid var(--gold); box-shadow:0 0 30px #C9A84C55;}
-  .phone .screen .app-name{ font-family:'Cinzel',serif; color:#fff; font-size:15px; letter-spacing:2px; }
-  .phone .screen .app-name-am{ color:var(--gold-light); font-size:13px; margin-top:4px; }
-  .phone .screen .mini-row{ display:flex; gap:8px; margin-top:26px; }
-  .phone .screen .mini-row span{ width:34px; height:34px; border-radius:10px; background:#C9A84C1c; border:1px solid #C9A84C40; display:flex; align-items:center; justify-content:center; font-size:15px;}
-  .preview-copy{ max-width:400px; }
-  .preview-copy h2{ font-size:clamp(1.6rem,3.4vw,2.2rem); color:#fff; margin-top:0; }
-  .preview-copy .am{ color:var(--gold-light); font-size:1.2rem; margin-bottom:18px; display:block; }
-  .preview-copy p{ color:var(--muted); line-height:1.8; }
-  .preview-list{ list-style:none; padding:0; margin:26px 0 0; display:flex; flex-direction:column; gap:12px;}
-  .preview-list li{ display:flex; align-items:center; gap:12px; color:var(--ink); font-size:14px; }
-  .preview-list li::before{ content:'☩'; color:var(--gold); font-size:14px; }
+/* ── Marquee ── */
+.marquee-strip{ border-top:1px solid var(--line); border-bottom:1px solid var(--line); background:var(--bg-1); padding:22px 0; overflow:hidden; position:relative; z-index:3; }
+.marquee-track{ display:flex; gap:56px; white-space:nowrap; width:max-content; }
+.marquee-track span{ font-family:'Cinzel',serif; font-size:14px; letter-spacing:3px; color:var(--muted-2); text-transform:uppercase; display:flex; align-items:center; gap:56px; }
+.marquee-track span em{ font-style:normal; color:var(--gold); margin-right:56px; }
 
-  /* ── Support ── */
-  .support{
-    text-align:center; background:radial-gradient(ellipse at 50% 0%, #C9A84C14, transparent 60%), var(--bg-2);
-    border-top:1px solid var(--border); border-bottom:1px solid var(--border);
-  }
-  .support .icon{ font-size:38px; margin-bottom:18px; }
-  .support-copy{ max-width:640px; margin:0 auto 36px; }
-  .support-copy p{ color:var(--muted); line-height:1.85; margin:0 0 16px; font-size:15px;}
-  .support-copy p.am{ color:#EADFC4; font-size:16px; }
+/* ── Scripture ── */
+.scripture{ position:relative; padding:130px 6vw; text-align:center; background:var(--bg); overflow:hidden; }
+.scripture .cross-mark{ font-size:26px; color:var(--gold); margin-bottom:24px; display:inline-block; }
+.scripture blockquote{ margin:0 auto 14px; max-width:760px; font-family:'Cinzel',serif; font-style:italic;
+  font-size:clamp(1.3rem,3.2vw,2.1rem); background:linear-gradient(100deg,#fff 20%, var(--gold-light) 50%, #fff 80%);
+  -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; background-size:220% 100%;
+  line-height:1.6; font-weight:500; }
+.scripture .am{ max-width:760px; margin:0 auto 22px; font-size:clamp(1.2rem,3.2vw,1.8rem); color:#fff; line-height:1.9; }
+.scripture cite{ font-style:normal; color:var(--muted); font-size:12px; letter-spacing:2px; text-transform:uppercase; }
 
-  /* ── Footer ── */
-  footer{ text-align:center; padding:70px 24px 46px; color:var(--muted); }
-  footer .cross{ font-size:26px; color:var(--gold); margin-bottom:14px; }
-  footer .blessing{ color:var(--gold-light); font-family:'Cinzel',serif; letter-spacing:1px; margin-bottom:10px; font-size:15px;}
-  footer .fine{ font-size:12px; opacity:.6; max-width:440px; margin:18px auto 0; line-height:1.7; }
+/* ── Section shell ── */
+section{ position:relative; }
+.section-pad{ padding:150px 6vw; }
+.section-head{ display:flex; justify-content:space-between; align-items:flex-end; gap:30px; margin-bottom:80px; flex-wrap:wrap; }
+.eyebrow{ color:var(--gold); letter-spacing:4px; font-size:11px; font-weight:600; text-transform:uppercase; display:flex; align-items:center; gap:10px; margin-bottom:18px; }
+.eyebrow::before{ content:''; width:24px; height:1px; background:var(--gold); }
+.section-title{ font-size:clamp(2.1rem,4.6vw,3.4rem); color:#fff; margin:0; line-height:1.08; max-width:640px; }
+.section-title .am{ display:block; color:var(--gold-light); font-size:.55em; margin-top:10px; }
+.section-note{ max-width:280px; color:var(--muted); font-size:14px; line-height:1.8; text-align:right; }
+@media (max-width:760px){ .section-note{ text-align:left; max-width:100%; } }
 
-  .reveal{ opacity:0; transform:translateY(50px); }
+/* ── Features — editorial index list ── */
+.feature-list{ display:flex; flex-direction:column; }
+.feature-row{
+  display:grid; grid-template-columns:90px 1fr 1fr; gap:32px; align-items:center;
+  padding:38px 0; border-top:1px solid var(--line); position:relative; cursor:pointer;
+  opacity:0; transform:translateY(30px);
+}
+.feature-list .feature-row:last-child{ border-bottom:1px solid var(--line); }
+.feature-row .idx{ font-family:'Cinzel',serif; color:var(--muted-2); font-size:14px; letter-spacing:2px; }
+.feature-row .head{ display:flex; align-items:center; gap:18px; }
+.feature-row .token{ width:52px; height:52px; border-radius:16px; border:1px solid var(--line); display:flex; align-items:center; justify-content:center; font-size:22px; background:var(--glass); transition:transform .5s var(--ease-soft), border-color .4s, box-shadow .4s; transform-style:preserve-3d; }
+.feature-row h3{ margin:0; font-size:clamp(1.3rem,2.4vw,1.8rem); color:#fff; font-weight:600; font-family:'Inter',sans-serif; }
+.feature-row h3 + .am{ display:block; color:var(--gold-light); font-size:.6em; margin-top:2px; font-weight:500;}
+.feature-row p{ margin:0; color:var(--muted); font-size:14.5px; line-height:1.8; max-width:420px; }
+.feature-row .glow-line{ position:absolute; left:0; bottom:-1px; width:0%; height:1px; background:linear-gradient(90deg,var(--gold-light),transparent); transition:width .6s var(--ease-soft); }
+.feature-row:hover{ }
+.feature-row:hover .glow-line{ width:100%; }
+.feature-row:hover .token{ border-color:#EFD48F88; box-shadow:0 0 30px #C9A84C33; transform:rotateY(180deg); }
+@media (max-width:760px){
+  .feature-row{ grid-template-columns:1fr; gap:14px; }
+  .feature-row .idx{ order:-1; }
+}
 
-  @media (prefers-reduced-motion: reduce){
-    html{ scroll-behavior:auto; }
-    .reveal, .feature-card{ opacity:1 !important; transform:none !important; }
-  }
+/* ── App preview ── */
+.preview-section{ background:var(--bg-1); border-top:1px solid var(--line); border-bottom:1px solid var(--line); overflow:hidden; }
+.preview-wrap{ display:grid; grid-template-columns:.9fr 1.1fr; gap:70px; align-items:center; }
+@media (max-width:900px){ .preview-wrap{ grid-template-columns:1fr; } }
+.phone-stage{ perspective:1600px; position:relative; display:flex; justify-content:center; }
+.phone-chip{ position:absolute; width:64px; height:64px; border-radius:18px; background:var(--glass); border:1px solid var(--line); backdrop-filter:blur(8px); display:flex; align-items:center; justify-content:center; font-size:24px; box-shadow:0 20px 40px -14px #000000aa; }
+.chip-1{ top:6%; left:-4%; }
+.chip-2{ bottom:14%; right:-6%; }
+.chip-3{ top:44%; right:-10%; }
+.phone{
+  width:270px; height:560px; border-radius:44px; padding:12px;
+  background:linear-gradient(155deg,#2a2015,#0d0906);
+  border:1px solid #EFD48F3d;
+  box-shadow:0 50px 100px -24px #000000cc, 0 0 70px #C9A84C22, inset 0 0 0 1px #ffffff08;
+  transform:rotateY(-16deg) rotateX(3deg);
+  transition:transform .7s var(--ease-soft);
+  position:relative; z-index:2;
+}
+.phone-stage:hover .phone{ transform:rotateY(-4deg) rotateX(0deg); }
+.phone .screen{ width:100%; height:100%; border-radius:34px; overflow:hidden; position:relative;
+  background:radial-gradient(circle at 50% 0%, #241a10, #0c0906 70%); padding:22px; display:flex; flex-direction:column; gap:14px; }
+.mock-topbar{ display:flex; justify-content:space-between; align-items:center; }
+.mock-topbar img{ width:30px; height:30px; border-radius:50%; border:1px solid var(--gold); }
+.mock-topbar .dots{ display:flex; gap:4px; }
+.mock-topbar .dots span{ width:4px; height:4px; border-radius:50%; background:#EFD48F55; }
+.mock-card{ border-radius:16px; border:1px solid #EFD48F26; background:#ffffff06; padding:14px; }
+.mock-card .lbl{ font-size:9px; letter-spacing:2px; color:var(--gold-light); text-transform:uppercase; margin-bottom:8px; }
+.mock-card .big{ font-family:'Cinzel',serif; font-size:26px; color:#fff; }
+.mock-card .sm{ font-size:11px; color:var(--muted); margin-top:4px; }
+.mock-row{ display:flex; gap:8px; }
+.mock-row span{ flex:1; height:36px; border-radius:10px; background:#EFD48F12; border:1px solid #EFD48F26; display:flex; align-items:center; justify-content:center; font-size:15px; }
+.preview-copy .eyebrow{ }
+.preview-copy h2{ font-size:clamp(1.8rem,3.6vw,2.6rem); color:#fff; margin:0 0 6px; }
+.preview-copy .am{ color:var(--gold-light); font-size:1.15rem; margin-bottom:22px; display:block; }
+.preview-copy > p{ color:var(--muted); line-height:1.85; font-size:15px; max-width:460px; }
+.preview-list{ list-style:none; padding:0; margin:30px 0 0; display:flex; flex-direction:column; gap:16px; }
+.preview-list li{ display:flex; align-items:flex-start; gap:14px; color:var(--ink); font-size:14.5px; opacity:0; transform:translateX(-16px); }
+.preview-list li .num{ font-family:'Cinzel',serif; color:var(--gold); font-size:13px; border:1px solid var(--line); width:26px; height:26px; border-radius:50%; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+
+/* ── Support ── */
+.support{ text-align:center; padding:150px 6vw; position:relative; background:
+  radial-gradient(ellipse 70% 60% at 50% 0%, #C9A84C1a, transparent 65%), var(--bg); }
+.support .icon{ font-size:34px; margin-bottom:20px; opacity:.9; }
+.support-copy{ max-width:660px; margin:0 auto 40px; }
+.support-copy p{ color:var(--muted); line-height:1.9; margin:0 0 18px; font-size:15.5px; }
+.support-copy p.am{ color:#EADFC4; font-size:17px; }
+
+/* ── Footer ── */
+footer{ border-top:1px solid var(--line); padding:70px 6vw 40px; }
+.footer-grid{ display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:40px; margin-bottom:60px; }
+.footer-blessing{ max-width:340px; }
+.footer-blessing .cross{ font-size:24px; color:var(--gold); margin-bottom:14px; }
+.footer-blessing .line1{ color:var(--gold-light); font-family:'Cinzel',serif; letter-spacing:1px; font-size:15px; margin-bottom:8px; }
+.footer-blessing .line2{ color:var(--muted); font-size:13px; line-height:1.7; }
+.footer-links{ display:flex; gap:60px; flex-wrap:wrap; }
+.footer-col h4{ margin:0 0 16px; font-size:11px; letter-spacing:2px; text-transform:uppercase; color:var(--muted-2); font-weight:600; }
+.footer-col a{ display:block; color:var(--muted); font-size:13.5px; text-decoration:none; margin-bottom:10px; transition:color .3s; }
+.footer-col a:hover{ color:var(--gold-light); }
+.footer-bottom{ display:flex; justify-content:space-between; padding-top:26px; border-top:1px solid var(--line); color:var(--muted-2); font-size:12px; flex-wrap:wrap; gap:10px; }
+
+.reveal{ opacity:0; transform:translateY(46px); }
+.reveal-fade{ opacity:0; }
+
+@media (prefers-reduced-motion: reduce){
+  html{ scroll-behavior:auto; }
+  .reveal, .reveal-fade, .feature-row, .preview-list li{ opacity:1 !important; transform:none !important; }
+  #preloader{ display:none; }
+}
 </style>
 </head>
 <body>
 
-<header class="nav">
-  <div class="brand"><img src="logo.png" alt="Yenefs Abat logo">YENEFS ABAT</div>
-  <nav>
+<div id="preloader"><div class="mark">☩</div><div class="bar"><i></i></div><div class="word">YENEFS ABAT</div></div>
+
+<div class="cursor-ring" id="cursorRing"></div>
+<div class="cursor-dot" id="cursorDot"></div>
+
+<header class="nav" id="siteNav">
+  <a class="brand" href="#hero"><img src="logo.png" alt="Yenefs Abat logo">YENEFS ABAT</a>
+  <div class="nav-links">
     <a href="#features">Features</a>
-    <a href="#preview">App</a>
+    <a href="#preview">The App</a>
     <a href="#support">Support</a>
-    <a class="btn btn-gold nav-cta" style="padding:10px 20px;font-size:12px;" href="#hero" id="nav-download">Get the App</a>
-  </nav>
+    <a class="nav-cta magnetic" href="#hero" id="nav-download">Get the App</a>
+  </div>
+  <button class="nav-burger" id="navBurger" aria-label="Menu"><span></span></button>
 </header>
+
+<div class="mobile-menu" id="mobileMenu">
+  <a href="#features">Features</a>
+  <a href="#preview">The App</a>
+  <a href="#support">Support</a>
+  <a href="#hero" id="mob-download">Get the App</a>
+</div>
 
 <section class="hero" id="hero">
   <canvas id="hero-canvas"></canvas>
-  <div class="hero-content">
-    <img class="hero-logo" src="logo.png" alt="Yenefs Abat">
-    <h1 id="hero-title">YENEFS ABAT</h1>
-    <div class="am-title am">የነፍስ አባት</div>
-    <div class="divider"></div>
-    <p class="tagline">Your spiritual companion in the Ethiopian Orthodox Tewahedo faith — always with you, wherever you are.</p>
-    <p class="tagline am">የነፍስ አባትዎ — በኪስዎ ውስጥ ያለ መንፈሳዊ አጋር፣ በየትም ቢሆኑ ካንተ ጋር።</p>
-    <div class="btn-row">
-      <button class="btn btn-gold" id="btn-download">✦ Download the App</button>
-      <a class="btn btn-ghost" href="#features" id="btn-explore">Explore Features</a>
+  <div class="hero-grid">
+    <div>
+      <div class="hero-eyebrow reveal-fade"><span class="dot"></span>Ethiopian Orthodox Tewahedo Companion</div>
+      <h1 id="hero-title">
+        <span class="line">YENEFS</span>
+        <span class="line">ABAT</span>
+      </h1>
+      <div class="am-title am reveal-fade">የነፍስ አባት</div>
+    </div>
+    <div class="hero-side">
+      <p class="reveal-fade">Your spiritual companion in the Ethiopian Orthodox Tewahedo faith — always with you, wherever you are.</p>
+      <p class="am reveal-fade">የነፍስ አባትዎ — በኪስዎ ውስጥ ያለ መንፈሳዊ አጋር።</p>
+      <div class="btn-row reveal-fade">
+        <button class="btn btn-gold magnetic" id="btn-download">Download<span class="btn-icon">↗</span></button>
+        <a class="btn btn-ghost magnetic" href="#features">Explore</a>
+      </div>
     </div>
   </div>
-  <div class="scroll-cue">SCROLL<span></span></div>
+  <div class="scroll-cue"><span>SCROLL</span><span class="stem"></span></div>
 </section>
+
+<div class="marquee-strip">
+  <div class="marquee-track" id="marqueeTrack">
+    <span><em>☩</em>CONFESSION<em>☩</em>PRAYER<em>☩</em>CALENDAR<em>☩</em>SYNAXARIUM<em>☩</em>CHURCH<em>☩</em>JOURNEY</span>
+    <span><em>☩</em>CONFESSION<em>☩</em>PRAYER<em>☩</em>CALENDAR<em>☩</em>SYNAXARIUM<em>☩</em>CHURCH<em>☩</em>JOURNEY</span>
+  </div>
+</div>
 
 <section class="scripture">
-  <div class="cross-mark">☩</div>
-  <blockquote class="reveal">&ldquo;Return to Me, and I will return to you.&rdquo;</blockquote>
-  <div class="am reveal">ተመለሱ ወደ እኔ እኔም እመለሳለሁ ወደ እናንተ</div>
-  <cite class="reveal">Malachi 3:7 &nbsp;·&nbsp; ሚልክያስ ፫፥፯</cite>
+  <div class="cross-mark reveal-fade">☩</div>
+  <blockquote class="reveal-fade">&ldquo;Return to Me, and I will return to you.&rdquo;</blockquote>
+  <div class="am reveal-fade">ተመለሱ ወደ እኔ እኔም እመለሳለሁ ወደ እናንተ</div>
+  <cite class="reveal-fade">Malachi 3:7 &nbsp;·&nbsp; ሚልክያስ ፫፥፯</cite>
 </section>
 
-<section id="features">
-  <div class="eyebrow reveal">What's Inside</div>
-  <h2 class="section-title reveal">A Companion for Your Spiritual Journey</h2>
-  <div class="section-title-am reveal">ለመንፈሳዊ ጉዞዎ አጋር</div>
-  <div class="features-grid" id="features-grid">
-    <div class="feature-card"><span class="icon">✝️</span><h3>Confession Guide</h3><span class="am">የንስሐ መመሪያ</span><p>Prepare for confession, examine your conscience, and stay faithful to the sacrament of repentance.</p></div>
-    <div class="feature-card"><span class="icon">🔔</span><h3>Prayer Reminders</h3><span class="am">የጸሎት ማስታወሻ</span><p>Gentle calls to prayer through the day, like the church bell — morning, noon, evening, and night.</p></div>
-    <div class="feature-card"><span class="icon">📅</span><h3>Orthodox Calendar</h3><span class="am">የቀን መቁጠሪያ</span><p>Know the true Ethiopian date, every fast and feast day, all year round.</p></div>
-    <div class="feature-card"><span class="icon">📖</span><h3>Synaxarium</h3><span class="am">ስንክሳር</span><p>The life of a saint remembered for every single day of the year.</p></div>
-    <div class="feature-card"><span class="icon">⛪</span><h3>Nearest Church</h3><span class="am">ቅርብ ቤተ ክርስቲያን</span><p>Find Ethiopian Orthodox churches and a spiritual father wherever you go.</p></div>
-    <div class="feature-card"><span class="icon">🔥</span><h3>Spiritual Journey</h3><span class="am">መንፈሳዊ ጉዞ</span><p>Track your prayer and confession streaks, and grow steadily closer to God.</p></div>
+<section class="section-pad" id="features">
+  <div class="wrap">
+    <div class="section-head">
+      <div>
+        <div class="eyebrow reveal">What&rsquo;s Inside</div>
+        <h2 class="section-title reveal">A companion for your spiritual journey<span class="am">ለመንፈሳዊ ጉዞዎ አጋር</span></h2>
+      </div>
+      <p class="section-note reveal">Six tools, built with reverence for the Ethiopian Orthodox Tewahedo tradition — from your first prayer to your daily confession.</p>
+    </div>
+    <div class="feature-list" id="featureList">
+      <div class="feature-row"><span class="idx">01</span><div class="head"><span class="token">✝️</span><div><h3>Confession Guide<span class="am">የንስሐ መመሪያ</span></h3></div></div><p>Prepare for confession, examine your conscience, and stay faithful to the sacrament of repentance.</p><span class="glow-line"></span></div>
+      <div class="feature-row"><span class="idx">02</span><div class="head"><span class="token">🔔</span><div><h3>Prayer Reminders<span class="am">የጸሎት ማስታወሻ</span></h3></div></div><p>Gentle calls to prayer through the day, like the church bell — morning, noon, evening, and night.</p><span class="glow-line"></span></div>
+      <div class="feature-row"><span class="idx">03</span><div class="head"><span class="token">📅</span><div><h3>Orthodox Calendar<span class="am">የቀን መቁጠሪያ</span></h3></div></div><p>Know the true Ethiopian date, every fast and feast day, all year round.</p><span class="glow-line"></span></div>
+      <div class="feature-row"><span class="idx">04</span><div class="head"><span class="token">📖</span><div><h3>Synaxarium<span class="am">ስንክሳር</span></h3></div></div><p>The life of a saint remembered for every single day of the year.</p><span class="glow-line"></span></div>
+      <div class="feature-row"><span class="idx">05</span><div class="head"><span class="token">⛪</span><div><h3>Nearest Church<span class="am">ቅርብ ቤተ ክርስቲያን</span></h3></div></div><p>Find Ethiopian Orthodox churches and a spiritual father wherever you go.</p><span class="glow-line"></span></div>
+      <div class="feature-row"><span class="idx">06</span><div class="head"><span class="token">🔥</span><div><h3>Spiritual Journey<span class="am">መንፈሳዊ ጉዞ</span></h3></div></div><p>Track your prayer and confession streaks, and grow steadily closer to God.</p><span class="glow-line"></span></div>
+    </div>
   </div>
 </section>
 
-<section id="preview">
-  <div class="preview-wrap">
+<section class="preview-section section-pad" id="preview">
+  <div class="wrap preview-wrap">
     <div class="phone-stage reveal">
+      <div class="phone-chip chip-1">✝️</div>
+      <div class="phone-chip chip-2">🔔</div>
+      <div class="phone-chip chip-3">📅</div>
       <div class="phone">
         <div class="screen">
-          <img src="logo.png" alt="Yenefs Abat">
-          <div class="app-name">YENEFS ABAT</div>
-          <div class="app-name-am am">የነፍስ አባት</div>
-          <div class="mini-row">
-            <span>✝️</span><span>🔔</span><span>📅</span><span>⛪</span>
-          </div>
+          <div class="mock-topbar"><img src="logo.png" alt=""><div class="dots"><span></span><span></span><span></span></div></div>
+          <div class="mock-card"><div class="lbl">Fasting Streak</div><div class="big">14</div><div class="sm">Best · 30 days</div></div>
+          <div class="mock-card"><div class="lbl">Verse of the Day</div><div class="sm" style="color:#E8D9B8;">&ldquo;I can do all things through Christ.&rdquo;</div></div>
+          <div class="mock-row"><span>✝️</span><span>🔔</span><span>📅</span><span>⛪</span></div>
         </div>
       </div>
     </div>
-    <div class="preview-copy reveal">
-      <div class="eyebrow" style="text-align:left;">In Your Pocket</div>
-      <h2>Faith, Carried With You</h2>
-      <span class="am">እምነት፣ ካንተ ጋር ይዘሽ</span>
-      <p>Built with reverence for the Ethiopian Orthodox Tewahedo tradition — every detail, from the calendar to the prayers, made to serve the faithful.</p>
-      <ul class="preview-list">
-        <li>Bilingual — Amharic &amp; English throughout</li>
-        <li>Works offline for your daily prayers</li>
-        <li>Gentle, respectful notifications</li>
-        <li>Free for the community</li>
+    <div class="preview-copy">
+      <div class="eyebrow reveal">In Your Pocket</div>
+      <h2 class="reveal">Faith, carried with you</h2>
+      <span class="am reveal">እምነት፣ ካንተ ጋር ይዘሽ</span>
+      <p class="reveal">Built with reverence for the Ethiopian Orthodox Tewahedo tradition — every detail, from the calendar to the prayers, made to serve the faithful.</p>
+      <ul class="preview-list" id="previewList">
+        <li><span class="num">01</span>Bilingual — Amharic &amp; English throughout</li>
+        <li><span class="num">02</span>Works offline for your daily prayers</li>
+        <li><span class="num">03</span>Gentle, respectful notifications</li>
+        <li><span class="num">04</span>Free for the community</li>
       </ul>
     </div>
   </div>
 </section>
 
 <section class="support" id="support">
-  <div class="icon">🙏</div>
-  <div class="eyebrow reveal">Keep It Free</div>
-  <h2 class="section-title reveal">Support Yenefs Abat</h2>
-  <div class="section-title-am reveal" style="margin-bottom:30px;">የነፍስ አባትን ይደግፉ</div>
+  <div class="icon reveal-fade">🙏</div>
+  <div class="eyebrow reveal-fade" style="justify-content:center;">Keep It Free</div>
+  <h2 class="section-title reveal-fade" style="margin:0 auto 40px;text-align:center;">Support Yenefs Abat<span class="am">የነፍስ አባትን ይደግፉ</span></h2>
   <div class="support-copy">
-    <p class="reveal">Yenefs Abat is built and kept free for the Ethiopian Orthodox Tewahedo community — prayer reminders, the fasting calendar, confession guidance, and a way to find a church wherever you are. Your gift helps us keep it free, add more authentic content, and keep serving the faithful.</p>
-    <p class="am reveal">Yenefs Abat ለኢትዮጵያ ኦርቶዶክስ ተዋሕዶ ቤተሰብ ነጻ ሆኖ እንዲቆይ ተደርጎ የተሠራ ነው። ስጦታዎ ነጻ አድርገን እንድንቀጥል፣ ተጨማሪ እውነተኛ ይዘት እንድንጨምር ይረዳናል።</p>
+    <p class="reveal-fade">Yenefs Abat is built and kept free for the Ethiopian Orthodox Tewahedo community — prayer reminders, the fasting calendar, confession guidance, and a way to find a church wherever you are. Your gift helps us keep it free, add more authentic content, and keep serving the faithful.</p>
+    <p class="am reveal-fade">Yenefs Abat ለኢትዮጵያ ኦርቶዶክስ ተዋሕዶ ቤተሰብ ነጻ ሆኖ እንዲቆይ ተደርጎ የተሠራ ነው። ስጦታዎ ነጻ አድርገን እንድንቀጥል፣ ተጨማሪ እውነተኛ ይዘት እንድንጨምር ይረዳናል።</p>
   </div>
-  <a class="btn btn-gold reveal" href="https://gofund.me/eea5bcece" target="_blank" rel="noopener">♥ Support on GoFundMe</a>
+  <a class="btn btn-gold magnetic reveal-fade" href="https://gofund.me/eea5bcece" target="_blank" rel="noopener">♥ Support on GoFundMe</a>
 </section>
 
 <footer>
-  <div class="cross">☩</div>
-  <div class="blessing">እግዚአብሔር ይባርክዎ — God bless you</div>
-  <div style="font-size:13px;">Made with faith for the Ethiopian Orthodox Tewahedo community</div>
-  <div class="fine">Yenefs Abat &middot; የነፍስ አባት &copy; <span id="year"></span></div>
+  <div class="wrap">
+    <div class="footer-grid">
+      <div class="footer-blessing">
+        <div class="cross">☩</div>
+        <div class="line1">እግዚአብሔር ይባርክዎ — God bless you</div>
+        <div class="line2">Made with faith for the Ethiopian Orthodox Tewahedo community, wherever they are in the world.</div>
+      </div>
+      <div class="footer-links">
+        <div class="footer-col"><h4>Explore</h4><a href="#features">Features</a><a href="#preview">The App</a><a href="#support">Support</a></div>
+        <div class="footer-col"><h4>Connect</h4><a href="https://gofund.me/eea5bcece" target="_blank" rel="noopener">GoFundMe</a></div>
+      </div>
+    </div>
+    <div class="footer-bottom"><span>Yenefs Abat &middot; የነፍስ አባት &copy; <span id="year"></span></span><span>☩</span></div>
+  </div>
 </footer>
 
 <!-- ══════════ Three.js hero scene ══════════ -->
@@ -309,8 +429,6 @@
 <script type="module">
 import * as THREE from 'three';
 
-document.getElementById('year').textContent = new Date().getFullYear();
-
 const canvas = document.getElementById('hero-canvas');
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const isSmall = window.innerWidth < 768;
@@ -318,29 +436,50 @@ const isLowPower = (navigator.hardwareConcurrency || 4) <= 4;
 const simplified = isSmall || isLowPower;
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.FogExp2(0x0d0b08, 0.045);
+scene.fog = new THREE.FogExp2(0x07060a, 0.05);
 
 const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
-camera.position.set(0, 0.2, simplified ? 8.5 : 7.2);
+camera.position.set(0.6, 0.1, simplified ? 8.6 : 7.4);
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, simplified ? 1.5 : 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
 
 // ── Lighting ──
-scene.add(new THREE.AmbientLight(0x4a3a20, 0.6));
-const key = new THREE.PointLight(0xffe3a8, 220, 30);
+scene.add(new THREE.AmbientLight(0x4a3a20, 0.55));
+const key = new THREE.PointLight(0xffe3a8, 260, 32);
 key.position.set(4, 5, 6);
 scene.add(key);
-const rim = new THREE.PointLight(0xc9a84c, 140, 30);
-rim.position.set(-5, -3, -4);
+const rim = new THREE.PointLight(0xc9a84c, 170, 32);
+rim.position.set(-5, -3, -3);
 scene.add(rim);
-const fill = new THREE.PointLight(0xffffff, 40, 30);
+const fill = new THREE.PointLight(0xfff3d8, 50, 32);
 fill.position.set(0, -4, 5);
 scene.add(fill);
 
-// ── Ethiopian cross geometry (flared / forked "pattée" tips) ──
+// ── Glow sprite behind the cross (cheap fake-bloom, no postprocessing) ──
+function makeGlowTexture() {
+  const size = 256;
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const ctx = c.getContext('2d');
+  const g = ctx.createRadialGradient(size/2, size/2, 0, size/2, size/2, size/2);
+  g.addColorStop(0, 'rgba(239,212,143,0.9)');
+  g.addColorStop(0.4, 'rgba(201,168,76,0.35)');
+  g.addColorStop(1, 'rgba(201,168,76,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, size, size);
+  return new THREE.CanvasTexture(c);
+}
+const glowSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: makeGlowTexture(), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+glowSprite.scale.set(7, 7, 1);
+glowSprite.position.set(0, 0, -1.4);
+scene.add(glowSprite);
+
+// ── Ethiopian cross geometry (flared / forked "pattee" tips) ──
 function buildCrossShape() {
   const a = 0.22, L = 1.3;
   const armPts = [
@@ -370,36 +509,51 @@ const crossGeo = new THREE.ExtrudeGeometry(buildCrossShape(), {
 crossGeo.center();
 
 const crossMat = new THREE.MeshStandardMaterial({
-  color: 0xC9A84C, metalness: 1, roughness: 0.28, emissive: 0x3a2a0a, emissiveIntensity: 0.25,
+  color: 0xC9A84C, metalness: 1, roughness: 0.26, emissive: 0x3a2a0a, emissiveIntensity: 0.3,
 });
 const cross = new THREE.Mesh(crossGeo, crossMat);
 scene.add(cross);
 
-// ── Floating embers / incense particles ──
-const particleCount = simplified ? 120 : 380;
-const positions = new Float32Array(particleCount * 3);
-const speeds = new Float32Array(particleCount);
-for (let i = 0; i < particleCount; i++) {
-  positions[i * 3] = (Math.random() - 0.5) * 14;
-  positions[i * 3 + 1] = (Math.random() - 0.5) * 10;
-  positions[i * 3 + 2] = (Math.random() - 0.5) * 10;
-  speeds[i] = 0.15 + Math.random() * 0.35;
+// ── Floating glass panel (depth companion element, core Three.js only) ──
+let glassPanel = null;
+if (!simplified) {
+  const panelGeo = new THREE.PlaneGeometry(1.6, 2.1);
+  const panelMat = new THREE.MeshPhysicalMaterial({
+    color: 0xffffff, transmission: 1, thickness: 0.4, roughness: 0.15,
+    metalness: 0, ior: 1.3, transparent: true, opacity: 0.35,
+  });
+  glassPanel = new THREE.Mesh(panelGeo, panelMat);
+  glassPanel.position.set(-2.4, -0.3, -1.6);
+  glassPanel.rotation.set(0.1, 0.5, 0.06);
+  scene.add(glassPanel);
 }
-const particleGeo = new THREE.BufferGeometry();
-particleGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-const particleMat = new THREE.PointsMaterial({
-  color: 0xE3C878, size: 0.028, transparent: true, opacity: 0.55,
-  blending: THREE.AdditiveBlending, depthWrite: false,
-});
-const particles = new THREE.Points(particleGeo, particleMat);
-scene.add(particles);
+
+// ── Floating embers / incense particles — two depth layers ──
+function makeParticleLayer(count, spread, size, opacity, speedMin, speedMax) {
+  const positions = new Float32Array(count * 3);
+  const speeds = new Float32Array(count);
+  for (let i = 0; i < count; i++) {
+    positions[i * 3] = (Math.random() - 0.5) * spread;
+    positions[i * 3 + 1] = (Math.random() - 0.5) * 10;
+    positions[i * 3 + 2] = (Math.random() - 0.5) * spread * 0.7;
+    speeds[i] = speedMin + Math.random() * (speedMax - speedMin);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  const mat = new THREE.PointsMaterial({ color: 0xE3C878, size, transparent: true, opacity, blending: THREE.AdditiveBlending, depthWrite: false });
+  const pts = new THREE.Points(geo, mat);
+  scene.add(pts);
+  return { pts, geo, speeds, count };
+}
+const backLayer = makeParticleLayer(simplified ? 60 : 200, 16, 0.02, 0.28, 0.08, 0.18);
+const frontLayer = makeParticleLayer(simplified ? 60 : 180, 11, 0.032, 0.6, 0.18, 0.4);
 
 // ── Mouse parallax ──
 let mouseX = 0, mouseY = 0, targetX = 0, targetY = 0;
 window.addEventListener('mousemove', (e) => {
   mouseX = (e.clientX / window.innerWidth - 0.5) * 2;
   mouseY = (e.clientY / window.innerHeight - 0.5) * 2;
-});
+}, { passive: true });
 
 function onResize() {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -408,33 +562,54 @@ function onResize() {
 }
 window.addEventListener('resize', onResize);
 
+function tickParticles(layer, dt) {
+  const arr = layer.geo.attributes.position.array;
+  for (let i = 0; i < layer.count; i++) {
+    let y = arr[i * 3 + 1] + layer.speeds[i] * dt * 1.4;
+    if (y > 5.5) y = -5.5;
+    arr[i * 3 + 1] = y;
+  }
+  layer.geo.attributes.position.needsUpdate = true;
+}
+
 const clock = new THREE.Clock();
 function animate() {
   const t = clock.getElapsedTime();
+  const dt = Math.min(clock.getDelta(), 0.05) * 60;
   requestAnimationFrame(animate);
 
-  cross.rotation.y = t * 0.28;
-  cross.rotation.x = Math.sin(t * 0.35) * 0.12;
+  const scrollProgress = window.__heroScrollProgress || 0; // 0 (top) → 1 (scrolled past hero)
 
-  targetX += (mouseX - targetX) * 0.04;
-  targetY += (mouseY - targetY) * 0.04;
-  camera.position.x = targetX * 0.9;
-  camera.position.y = 0.2 - targetY * 0.5;
-  camera.lookAt(0, 0, 0);
+  cross.rotation.y = t * 0.26 + scrollProgress * 1.4;
+  cross.rotation.x = Math.sin(t * 0.32) * 0.12;
+  cross.position.y = -scrollProgress * 0.9;
+  const s = 1 - scrollProgress * 0.18;
+  cross.scale.set(s, s, s);
+  crossMat.opacity = 1;
 
-  const posAttr = particleGeo.attributes.position;
-  for (let i = 0; i < particleCount; i++) {
-    let y = posAttr.array[i * 3 + 1] + speeds[i] * 0.012;
-    if (y > 5.5) y = -5.5;
-    posAttr.array[i * 3 + 1] = y;
+  glowSprite.position.copy(cross.position);
+  glowSprite.material.opacity = Math.max(0, 1 - scrollProgress * 1.3);
+
+  if (glassPanel) {
+    glassPanel.rotation.y = 0.5 + Math.sin(t * 0.2) * 0.08;
+    glassPanel.position.y = -0.3 + Math.sin(t * 0.4) * 0.15 - scrollProgress * 0.6;
   }
-  posAttr.needsUpdate = true;
+
+  targetX += (mouseX - targetX) * 0.045;
+  targetY += (mouseY - targetY) * 0.045;
+  camera.position.x = 0.6 + targetX * 0.85;
+  camera.position.y = 0.1 - targetY * 0.45;
+  camera.position.z = (simplified ? 8.6 : 7.4) + scrollProgress * 2.2;
+  camera.lookAt(0, -scrollProgress * 0.9, 0);
+
+  tickParticles(backLayer, dt);
+  tickParticles(frontLayer, dt);
 
   renderer.render(scene, camera);
 }
 
 if (reduceMotion) {
-  renderer.render(scene, camera); // one static frame
+  renderer.render(scene, camera);
 } else {
   animate();
 }
@@ -445,82 +620,156 @@ if (reduceMotion) {
 <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
 <script>
 (function () {
+  document.getElementById('year').textContent = new Date().getFullYear();
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const fineHover = window.matchMedia('(hover:hover) and (pointer:fine)').matches;
 
-  document.getElementById('btn-download').addEventListener('click', function () {
-    alert('Coming soon to Google Play!');
-  });
-  document.getElementById('nav-download').addEventListener('click', function (e) {
-    e.preventDefault();
-    alert('Coming soon to Google Play!');
-  });
+  function goDownload(e) { if (e) e.preventDefault(); alert('Coming soon to Google Play!'); }
+  document.getElementById('btn-download').addEventListener('click', goDownload);
+  document.getElementById('nav-download').addEventListener('click', goDownload);
+  document.getElementById('mob-download').addEventListener('click', goDownload);
 
-  if (reduceMotion || typeof gsap === 'undefined') {
-    document.querySelectorAll('.reveal, .feature-card').forEach(function (el) {
-      el.style.opacity = 1; el.style.transform = 'none';
-    });
-    return;
+  // ── Preloader ──
+  var pre = document.getElementById('preloader');
+  var preloaderDismissed = false;
+  function dismissPreloader() {
+    if (preloaderDismissed) return;
+    preloaderDismissed = true;
+    pre.classList.add('hide');
+    document.body.style.overflow = '';
+    startEntrance();
+  }
+  if (reduceMotion) {
+    pre.style.display = 'none';
+    document.body.style.overflow = '';
+  } else {
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('load', function () { setTimeout(dismissPreloader, 700); });
+    setTimeout(dismissPreloader, 2200); // safety fallback if load never fires quickly
   }
 
+  // ── Mobile menu ──
+  var burger = document.getElementById('navBurger');
+  var menu = document.getElementById('mobileMenu');
+  burger.addEventListener('click', function () {
+    burger.classList.toggle('open');
+    menu.classList.toggle('open');
+  });
+  menu.querySelectorAll('a').forEach(function (a) {
+    a.addEventListener('click', function () { burger.classList.remove('open'); menu.classList.remove('open'); });
+  });
+
+  // ── Nav solid-on-scroll ──
+  var nav = document.getElementById('siteNav');
+  window.addEventListener('scroll', function () {
+    nav.classList.toggle('solid', window.scrollY > 40);
+  }, { passive: true });
+
+  // ── Custom cursor ──
+  if (fineHover && !reduceMotion) {
+    document.body.classList.add('cursor-active');
+    var dot = document.getElementById('cursorDot'), ring = document.getElementById('cursorRing');
+    var dx = 0, dy = 0, rx = 0, ry = 0;
+    window.addEventListener('mousemove', function (e) { dx = e.clientX; dy = e.clientY; }, { passive: true });
+    (function loop() {
+      rx += (dx - rx) * 0.18; ry += (dy - ry) * 0.18;
+      dot.style.transform = 'translate(' + dx + 'px,' + dy + 'px) translate(-50%,-50%)';
+      ring.style.transform = 'translate(' + rx + 'px,' + ry + 'px) translate(-50%,-50%)';
+      requestAnimationFrame(loop);
+    })();
+    document.querySelectorAll('a, button, .magnetic, .feature-row').forEach(function (el) {
+      el.addEventListener('mouseenter', function () { ring.classList.add('is-active'); });
+      el.addEventListener('mouseleave', function () { ring.classList.remove('is-active'); });
+    });
+  }
+
+  // ── Magnetic buttons ──
+  if (fineHover && !reduceMotion && typeof gsap !== 'undefined') {
+    document.querySelectorAll('.magnetic').forEach(function (el) {
+      var moveX = gsap.quickTo(el, 'x', { duration: 0.5, ease: 'power3.out' });
+      var moveY = gsap.quickTo(el, 'y', { duration: 0.5, ease: 'power3.out' });
+      el.addEventListener('mousemove', function (e) {
+        var r = el.getBoundingClientRect();
+        moveX((e.clientX - r.left - r.width / 2) * 0.35);
+        moveY((e.clientY - r.top - r.height / 2) * 0.35);
+      });
+      el.addEventListener('mouseleave', function () { moveX(0); moveY(0); });
+    });
+  }
+
+  if (typeof gsap === 'undefined') return;
   gsap.registerPlugin(ScrollTrigger);
 
-  // Hero title — letter by letter
-  const titleEl = document.getElementById('hero-title');
-  const text = titleEl.textContent;
-  titleEl.innerHTML = text.split('').map(function (ch) {
-    return '<span class="split-char">' + (ch === ' ' ? '&nbsp;' : ch) + '</span>';
-  }).join('');
-  gsap.from(titleEl.querySelectorAll('.split-char'), {
-    opacity: 0, y: 24, duration: 0.6, stagger: 0.045, ease: 'power3.out', delay: 0.2,
+  // ── Hero scroll bridge for the Three.js scene ──
+  window.__heroScrollProgress = 0;
+  ScrollTrigger.create({
+    trigger: '#hero', start: 'top top', end: 'bottom top', scrub: true,
+    onUpdate: function (self) { window.__heroScrollProgress = self.progress; },
   });
-  gsap.from('.am-title, .divider, .tagline, .btn-row', {
-    opacity: 0, y: 20, duration: 0.8, stagger: 0.12, ease: 'power2.out', delay: 0.9,
-  });
-  gsap.from('.hero-logo', { opacity: 0, scale: 0.7, duration: 1, ease: 'back.out(1.6)', delay: 0.1 });
 
-  // Generic reveal-on-scroll
-  document.querySelectorAll('.reveal').forEach(function (el) {
-    gsap.to(el, {
-      opacity: 1, y: 0, duration: 0.9, ease: 'power2.out',
-      scrollTrigger: { trigger: el, start: 'top 88%' },
+  function startEntrance() {
+    if (reduceMotion) return;
+    var titleLines = document.querySelectorAll('#hero-title .line');
+    titleLines.forEach(function (line) {
+      var text = line.textContent;
+      line.innerHTML = text.split('').map(function (ch) {
+        return '<span class="split-char" style="opacity:0;transform:translateY(110%) rotate(4deg);display:inline-block;">' + ch + '</span>';
+      }).join('');
     });
-  });
-
-  // Feature cards — staggered reveal
-  gsap.to('.feature-card', {
-    opacity: 1, y: 0, duration: 0.8, stagger: 0.1, ease: 'power2.out',
-    scrollTrigger: { trigger: '#features-grid', start: 'top 82%' },
-  });
-
-  // Feature card 3D tilt on hover (desktop only)
-  if (window.matchMedia('(hover: hover)').matches) {
-    document.querySelectorAll('.feature-card').forEach(function (card) {
-      card.addEventListener('mousemove', function (e) {
-        const r = card.getBoundingClientRect();
-        const px = (e.clientX - r.left) / r.width - 0.5;
-        const py = (e.clientY - r.top) / r.height - 0.5;
-        gsap.to(card, { rotateY: px * 14, rotateX: -py * 14, duration: 0.4, ease: 'power2.out', transformPerspective: 800 });
-      });
-      card.addEventListener('mouseleave', function () {
-        gsap.to(card, { rotateY: 0, rotateX: 0, duration: 0.6, ease: 'power3.out' });
-      });
-    });
+    gsap.to('#hero-title .split-char', { opacity: 1, y: 0, rotate: 0, duration: 1, stagger: 0.035, ease: 'power4.out', delay: 0.1 });
+    gsap.set('.hero .reveal-fade', { y: 14 });
+    gsap.to('.hero-eyebrow', { opacity: 1, y: 0, duration: 0.7, ease: 'power2.out', delay: 0.05 });
+    gsap.to('.hero .reveal-fade:not(.hero-eyebrow)', { opacity: 1, y: 0, duration: 0.9, stagger: 0.1, ease: 'power2.out', delay: 0.7 });
+  }
+  if (reduceMotion) {
+    document.querySelectorAll('.reveal-fade').forEach(function (el) { el.style.opacity = 1; });
   }
 
-  // Scripture strip subtle parallax
-  gsap.to('.scripture', {
-    backgroundPosition: '50% 20%',
-    scrollTrigger: { trigger: '.scripture', start: 'top bottom', end: 'bottom top', scrub: true },
+  // ── Generic reveals ──
+  gsap.utils.toArray('.reveal').forEach(function (el) {
+    gsap.to(el, { opacity: 1, y: 0, duration: 1, ease: 'power3.out', scrollTrigger: { trigger: el, start: 'top 88%' } });
+  });
+  gsap.utils.toArray('.reveal-fade').forEach(function (el) {
+    if (el.closest('.hero')) return; // handled by entrance timeline
+    gsap.to(el, { opacity: 1, duration: 1.1, ease: 'power2.out', scrollTrigger: { trigger: el, start: 'top 90%' } });
   });
 
-  // Nav background solidify on scroll
-  ScrollTrigger.create({
-    start: 100,
-    onUpdate: function (self) {
-      document.querySelector('header.nav').style.background = self.progress > 0 || window.scrollY > 40
-        ? 'rgba(13,11,8,.92)' : 'linear-gradient(to bottom, rgba(13,11,8,.85), rgba(13,11,8,0))';
-    },
+  // ── Feature rows ──
+  gsap.to('#featureList .feature-row', {
+    opacity: 1, y: 0, duration: 0.9, stagger: 0.09, ease: 'power3.out',
+    scrollTrigger: { trigger: '#featureList', start: 'top 85%' },
   });
+
+  // ── Preview list ──
+  gsap.to('#previewList li', {
+    opacity: 1, x: 0, duration: 0.7, stagger: 0.1, ease: 'power2.out',
+    scrollTrigger: { trigger: '#previewList', start: 'top 88%' },
+  });
+
+  // ── Phone parallax chips ──
+  if (fineHover && !reduceMotion) {
+    var stage = document.querySelector('.phone-stage');
+    if (stage) {
+      var chips = stage.querySelectorAll('.phone-chip');
+      stage.addEventListener('mousemove', function (e) {
+        var r = stage.getBoundingClientRect();
+        var px = (e.clientX - r.left) / r.width - 0.5;
+        var py = (e.clientY - r.top) / r.height - 0.5;
+        chips.forEach(function (chip, i) {
+          var f = (i + 1) * 10;
+          gsap.to(chip, { x: px * f, y: py * f, duration: 0.6, ease: 'power2.out' });
+        });
+      });
+      stage.addEventListener('mouseleave', function () {
+        chips.forEach(function (chip) { gsap.to(chip, { x: 0, y: 0, duration: 0.8, ease: 'power3.out' }); });
+      });
+    }
+  }
+
+  // ── Marquee (paused on reduced motion) ──
+  if (!reduceMotion) {
+    gsap.to('#marqueeTrack', { xPercent: -50, duration: 22, ease: 'none', repeat: -1 });
+  }
 })();
 </script>
 
