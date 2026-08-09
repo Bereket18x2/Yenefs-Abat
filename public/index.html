@@ -27,17 +27,20 @@
 
 <style>
 :root{
-  --bg:#07060a;
-  --bg-1:#0c0a10;
-  --bg-2:#120e0a;
-  --ink:#F4EEE0;
-  --muted:#9C9184;
-  --muted-2:#6f665c;
-  --gold:#C9A84C;
-  --gold-light:#EFD48F;
+  --bg:#0a0f26;
+  --bg-1:#0d1533;
+  --bg-2:#121b40;
+  --ink:#F6F1E4;
+  --muted:#AFAECF;
+  --muted-2:#767AA8;
+  --gold:#D9B563;
+  --gold-light:#F5DFA0;
   --gold-dim:#8a6f34;
-  --line: #EFD48F1f;
-  --glass: linear-gradient(160deg, #ffffff0d, #ffffff02);
+  --sky-deep:#060812;
+  --sky-mid:#131c46;
+  --sky-glow:#FFE3A3;
+  --line: #F5DFA02a;
+  --glass: linear-gradient(160deg, #ffffff10, #ffffff03);
   --ease: cubic-bezier(.19,1,.22,1);
   --ease-soft: cubic-bezier(.22,.9,.28,1);
 }
@@ -47,8 +50,36 @@ body{
   margin:0; background:var(--bg); color:var(--ink);
   font-family:'Inter',sans-serif; overflow-x:clip;
   -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
-  cursor:default;
+  cursor:default; position:relative;
 }
+
+/* ── Heavenly sky backdrop: fixed behind every section ── */
+.sky-veil{ position:fixed; inset:0; z-index:-3; pointer-events:none;
+  background:
+    radial-gradient(ellipse 80% 55% at 50% -8%, #FFE3A333, transparent 62%),
+    radial-gradient(ellipse 60% 40% at 85% 10%, #FFD98a22, transparent 60%),
+    linear-gradient(180deg, var(--sky-deep) 0%, var(--bg) 32%, var(--sky-mid) 68%, #1b2350 100%);
+}
+.sky-clouds{ position:fixed; inset:-10% -10% -10% -10%; z-index:-2; pointer-events:none; opacity:.55; }
+.sky-clouds i{ position:absolute; border-radius:50%; filter:blur(40px); background:radial-gradient(circle, #ffffff22, transparent 70%); }
+.sky-clouds i:nth-child(1){ width:46vw; height:46vw; top:2%; left:-8%; animation:driftA 90s linear infinite; }
+.sky-clouds i:nth-child(2){ width:34vw; height:34vw; top:22%; right:-10%; background:radial-gradient(circle, #FFE3A322, transparent 70%); animation:driftB 120s linear infinite; }
+.sky-clouds i:nth-child(3){ width:52vw; height:26vw; top:55%; left:10%; animation:driftA 150s linear infinite reverse; }
+.sky-clouds i:nth-child(4){ width:30vw; height:30vw; bottom:2%; right:6%; background:radial-gradient(circle, #FFE3A31c, transparent 70%); animation:driftB 100s linear infinite reverse; }
+@keyframes driftA{ 0%{ transform:translateX(0) translateY(0); } 50%{ transform:translateX(4vw) translateY(-2vw); } 100%{ transform:translateX(0) translateY(0); } }
+@keyframes driftB{ 0%{ transform:translateX(0) translateY(0); } 50%{ transform:translateX(-5vw) translateY(3vw); } 100%{ transform:translateX(0) translateY(0); } }
+
+/* ── Angel wing motifs (ambient, decorative) ── */
+.wing{ position:absolute; opacity:.16; pointer-events:none; color:var(--gold-light); animation:wingfloat 9s ease-in-out infinite; z-index:1; }
+.wing.left{ transform:scaleX(-1); }
+@keyframes wingfloat{ 0%,100%{ transform:translateY(0) rotate(0deg); } 50%{ transform:translateY(-18px) rotate(-2deg); } }
+.wing.left{ animation-name:wingfloatL; }
+@keyframes wingfloatL{ 0%,100%{ transform:scaleX(-1) translateY(0) rotate(0deg); } 50%{ transform:scaleX(-1) translateY(-18px) rotate(2deg); } }
+
+@media (prefers-reduced-motion: reduce){
+  .sky-clouds i, .wing{ animation:none !important; }
+}
+@media (max-width:760px){ .wing{ display:none; } }
 .am{ font-family:'Noto Sans Ethiopic',sans-serif; }
 h1,h2,h3,.serif{ font-family:'Cinzel',serif; }
 a{ color:inherit; }
@@ -120,13 +151,19 @@ header.nav.solid{ padding:14px 6vw; background:#07060ae6; backdrop-filter:blur(1
 /* ── Hero ── */
 .hero{ position:relative; min-height:100svh; display:flex; align-items:flex-end; overflow:hidden; }
 #hero-canvas{ position:absolute; inset:0; width:100%; height:100%; z-index:0; }
+.hero-rays{ position:absolute; inset:-30% -30% -30% -30%; z-index:1; pointer-events:none; opacity:.35; mix-blend-mode:screen;
+  background:conic-gradient(from 200deg at 72% 28%, transparent 0deg, #FFE3A344 8deg, transparent 22deg, transparent 40deg, #FFE3A333 50deg, transparent 66deg, transparent 100deg, #FFE3A322 112deg, transparent 130deg, transparent 360deg);
+  animation:rayspin 140s linear infinite;
+}
+@keyframes rayspin{ to{ transform:rotate(360deg); } }
 .hero::before{ content:''; position:absolute; inset:0; z-index:1; pointer-events:none;
   background:
-    radial-gradient(ellipse 60% 50% at 72% 30%, #C9A84C1c, transparent 60%),
+    radial-gradient(ellipse 60% 50% at 72% 30%, #FFE3A32a, transparent 60%),
     radial-gradient(ellipse 90% 70% at 50% 100%, var(--bg) 20%, transparent 70%);
 }
 .hero::after{ content:''; position:absolute; inset:0; z-index:1; pointer-events:none;
-  background:linear-gradient(180deg, #07060a55 0%, transparent 18%, transparent 70%, var(--bg) 100%); }
+  background:linear-gradient(180deg, #06081266 0%, transparent 18%, transparent 70%, var(--bg) 100%); }
+@media (prefers-reduced-motion: reduce){ .hero-rays{ animation:none; } }
 .hero-grid{ position:relative; z-index:2; width:100%; padding:min(190px,22vh) 6vw 90px; display:grid; grid-template-columns:1.4fr .6fr; gap:40px; align-items:end; }
 .hero-eyebrow{ display:flex; align-items:center; gap:10px; color:var(--gold-light); font-size:12px; letter-spacing:4px; text-transform:uppercase; margin-bottom:26px; }
 .hero-eyebrow .dot{ width:5px; height:5px; border-radius:50%; background:var(--gold-light); box-shadow:0 0 8px var(--gold-light); }
@@ -251,6 +288,28 @@ section{ position:relative; }
 .preview-list li{ display:flex; align-items:flex-start; gap:14px; color:var(--ink); font-size:14.5px; opacity:0; transform:translateX(-16px); }
 .preview-list li .num{ font-family:'Cinzel',serif; color:var(--gold); font-size:13px; border:1px solid var(--line); width:26px; height:26px; border-radius:50%; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
 
+/* ── Sacred icons ── */
+.icon-grid{ display:grid; grid-template-columns:1fr 1fr; gap:50px; max-width:760px; margin:0 auto; }
+@media (max-width:760px){ .icon-grid{ grid-template-columns:1fr; max-width:340px; gap:44px; } }
+.icon-card{ text-align:center; perspective:1200px; }
+.icon-frame{
+  position:relative; aspect-ratio:3/4; border-radius:20px; overflow:hidden;
+  border:1.5px solid var(--gold); background:linear-gradient(160deg,#ffffff14,#00000038);
+  box-shadow:0 30px 70px -20px #000a, 0 0 44px #D9B56322; margin-bottom:22px;
+}
+.icon-frame img{ width:100%; height:100%; object-fit:cover; position:relative; z-index:2; }
+.icon-placeholder{ position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; z-index:1; }
+.icon-mark{ font-size:42px; color:var(--gold-light); opacity:.5; }
+.icon-label{ font-size:22px; color:var(--gold-light); }
+.icon-sub{ font-size:9.5px; letter-spacing:2.5px; text-transform:uppercase; color:var(--muted-2); }
+.icon-sweep{ position:absolute; inset:-60% -20%; z-index:3; pointer-events:none;
+  background:linear-gradient(115deg, transparent 42%, #FFE3A340 50%, transparent 58%);
+  animation:iconsweep 5.5s ease-in-out infinite; }
+@keyframes iconsweep{ 0%,100%{ transform:translateX(-55%); } 50%{ transform:translateX(55%); } }
+.icon-card h3{ font-size:1.05rem; color:#fff; margin:0; font-family:'Inter',sans-serif; font-weight:600; }
+.icon-card h3 .am{ display:block; color:var(--gold-light); font-size:.78em; margin-top:5px; font-weight:500; }
+@media (prefers-reduced-motion: reduce){ .icon-sweep{ animation:none; } }
+
 /* ── Support ── */
 .support{ text-align:center; padding:150px 6vw; position:relative; background:
   radial-gradient(ellipse 70% 60% at 50% 0%, #C9A84C1a, transparent 65%), var(--bg); }
@@ -284,6 +343,9 @@ footer{ border-top:1px solid var(--line); padding:70px 6vw 40px; }
 </head>
 <body>
 
+<div class="sky-veil"></div>
+<div class="sky-clouds"><i></i><i></i><i></i><i></i></div>
+
 <div id="preloader"><div class="mark">☩</div><div class="bar"><i></i></div><div class="word">YENEFS ABAT</div></div>
 
 <div class="cursor-ring" id="cursorRing"></div>
@@ -294,6 +356,7 @@ footer{ border-top:1px solid var(--line); padding:70px 6vw 40px; }
   <div class="nav-links">
     <a href="#features">Features</a>
     <a href="#preview">The App</a>
+    <a href="#icons">Icons</a>
     <a href="#support">Support</a>
     <a class="nav-cta magnetic" href="#hero" id="nav-download">Get the App</a>
   </div>
@@ -303,12 +366,16 @@ footer{ border-top:1px solid var(--line); padding:70px 6vw 40px; }
 <div class="mobile-menu" id="mobileMenu">
   <a href="#features">Features</a>
   <a href="#preview">The App</a>
+  <a href="#icons">Icons</a>
   <a href="#support">Support</a>
   <a href="#hero" id="mob-download">Get the App</a>
 </div>
 
 <section class="hero" id="hero">
   <canvas id="hero-canvas"></canvas>
+  <div class="hero-rays"></div>
+  <svg class="wing left" width="140" height="120" viewBox="0 0 140 120" style="top:14%;left:2%;" aria-hidden="true"><path d="M4 90 Q 30 20 70 8 Q 55 35 60 55 Q 40 40 30 60 Q 48 55 55 72 Q 32 68 20 85 Q 40 82 45 95 Q 20 100 4 90Z" fill="currentColor" fill-opacity=".12" stroke="currentColor" stroke-width="1"/></svg>
+  <svg class="wing" width="140" height="120" viewBox="0 0 140 120" style="top:10%;right:3%;" aria-hidden="true"><path d="M4 90 Q 30 20 70 8 Q 55 35 60 55 Q 40 40 30 60 Q 48 55 55 72 Q 32 68 20 85 Q 40 82 45 95 Q 20 100 4 90Z" fill="currentColor" fill-opacity=".12" stroke="currentColor" stroke-width="1"/></svg>
   <div class="hero-grid">
     <div>
       <div class="hero-eyebrow reveal-fade"><span class="dot"></span>Ethiopian Orthodox Tewahedo Companion</div>
@@ -394,6 +461,46 @@ footer{ border-top:1px solid var(--line); padding:70px 6vw 40px; }
   </div>
 </section>
 
+<section class="section-pad icons-section" id="icons">
+  <div class="wrap">
+    <div class="section-head">
+      <div>
+        <div class="eyebrow reveal">Icons of the Faith</div>
+        <h2 class="section-title reveal">Held in sacred memory<span class="am">በቅዱስ መታሰቢያ የተያዘ</span></h2>
+      </div>
+      <p class="section-note reveal">Two icons at the heart of the Ethiopian Orthodox Tewahedo tradition, framed here and waiting for their true images.</p>
+    </div>
+    <div class="icon-grid">
+      <div class="icon-card reveal">
+        <div class="icon-frame">
+          <div class="icon-sweep"></div>
+          <div class="icon-placeholder">
+            <span class="icon-mark">☩</span>
+            <span class="icon-label am">ሥላሴ</span>
+            <span class="icon-sub">Icon pending</span>
+          </div>
+          <!-- Drop the real icon at public/icons/trinity.jpg and it takes over automatically -->
+          <img src="icons/trinity.jpg" alt="Icon of the Holy Trinity" loading="lazy" onerror="this.style.display='none'">
+        </div>
+        <h3>The Holy Trinity<span class="am">ቅድስት ሥላሴ</span></h3>
+      </div>
+      <div class="icon-card reveal">
+        <div class="icon-frame">
+          <div class="icon-sweep"></div>
+          <div class="icon-placeholder">
+            <span class="icon-mark">☩</span>
+            <span class="icon-label am">እመቤታችን</span>
+            <span class="icon-sub">Icon pending</span>
+          </div>
+          <!-- Drop the real icon at public/icons/theotokos.jpg and it takes over automatically -->
+          <img src="icons/theotokos.jpg" alt="Icon of the Theotokos, the Virgin Mary" loading="lazy" onerror="this.style.display='none'">
+        </div>
+        <h3>The Theotokos<span class="am">እመቤታችን ማርያም</span></h3>
+      </div>
+    </div>
+  </div>
+</section>
+
 <section class="support" id="support">
   <div class="icon reveal-fade">🙏</div>
   <div class="eyebrow reveal-fade" style="justify-content:center;">Keep It Free</div>
@@ -433,13 +540,22 @@ const canvas = document.getElementById('hero-canvas');
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const isSmall = window.innerWidth < 768;
 const isLowPower = (navigator.hardwareConcurrency || 4) <= 4;
-const simplified = isSmall || isLowPower;
+const simplified = isSmall || isLowPower; // geometry/particle detail — performance concern
+// Camera distance is a *framing* concern, kept separate from performance: a
+// narrow phone and a low-power desktop need different distances even though
+// both simplify geometry the same way.
+function baseCameraZ() {
+  const aspect = window.innerWidth / window.innerHeight;
+  if (aspect < 0.6) return 7.3;   // tall phones — bring the cross closer so it reads at full presence
+  if (aspect < 0.9) return 7.8;   // phones/small tablets, portrait
+  return isLowPower ? 8.6 : 7.4;  // normal desktop/laptop, or a low-power machine at any width
+}
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.FogExp2(0x07060a, 0.05);
+scene.fog = new THREE.FogExp2(0x0a0f26, 0.05);
 
 const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
-camera.position.set(0.6, 0.1, simplified ? 8.6 : 7.4);
+camera.position.set(0.6, 0.1, baseCameraZ());
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, simplified ? 1.5 : 2));
@@ -479,13 +595,15 @@ glowSprite.scale.set(7, 7, 1);
 glowSprite.position.set(0, 0, -1.4);
 scene.add(glowSprite);
 
-// ── Ethiopian cross geometry (flared / forked "pattee" tips) ──
+// ── Ethiopian cross geometry — slender shaft, flared/forked "pattee"
+// arms, and the loop atop the upper arm traditional to EOTC hand and
+// processional crosses (used for the ribbon/handle attachment). ──
 function buildCrossShape() {
-  const a = 0.22, L = 1.3;
+  const a = 0.17, L = 1.42; // slimmer shaft, taller arms than a Latin cross
   const armPts = [
-    [a, a], [a, L], [0.42, L],
-    [0.28, L + 0.32], [0, L + 0.14], [-0.28, L + 0.32],
-    [-0.42, L], [-a, L], [-a, a],
+    [a, a], [a, L], [0.38, L],
+    [0.24, L + 0.3], [0, L + 0.12], [-0.24, L + 0.3],
+    [-0.38, L], [-a, L], [-a, a],
   ];
   const shape = new THREE.Shape();
   let first = true;
@@ -504,14 +622,29 @@ function buildCrossShape() {
 }
 
 const crossGeo = new THREE.ExtrudeGeometry(buildCrossShape(), {
-  depth: 0.32, bevelEnabled: true, bevelThickness: 0.05, bevelSize: 0.04, bevelSegments: simplified ? 2 : 4, curveSegments: simplified ? 8 : 16,
+  depth: 0.3, bevelEnabled: true, bevelThickness: 0.05, bevelSize: 0.04, bevelSegments: simplified ? 2 : 4, curveSegments: simplified ? 8 : 16,
 });
-crossGeo.center();
+crossGeo.translate(0, -0.55, 0); // shift down so the top loop has room above
 
 const crossMat = new THREE.MeshStandardMaterial({
-  color: 0xC9A84C, metalness: 1, roughness: 0.26, emissive: 0x3a2a0a, emissiveIntensity: 0.3,
+  color: 0xD9B563, metalness: 1, roughness: 0.22, emissive: 0x4a3510, emissiveIntensity: 0.35,
 });
-const cross = new THREE.Mesh(crossGeo, crossMat);
+const crossBody = new THREE.Mesh(crossGeo, crossMat);
+
+// Loop / halo ring above the top arm — the EOTC hand-cross handle motif
+const loop = new THREE.Mesh(new THREE.TorusGeometry(0.3, 0.06, simplified ? 8 : 14, simplified ? 16 : 28), crossMat);
+loop.position.set(0, 1.42, 0);
+
+// Soft nimbus halo behind the cross — flat, additive, independently rotating
+const halo = new THREE.Mesh(
+  new THREE.RingGeometry(1.5, 1.56, simplified ? 24 : 48),
+  new THREE.MeshBasicMaterial({ color: 0xFFE3A3, transparent: true, opacity: 0.28, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false })
+);
+halo.position.set(0, 0.15, -0.5);
+
+// `cross` is the group the animate loop below rotates/positions as one unit
+const cross = new THREE.Group();
+cross.add(crossBody, loop, halo);
 scene.add(cross);
 
 // ── Floating glass panel (depth companion element, core Three.js only) ──
@@ -555,10 +688,12 @@ window.addEventListener('mousemove', (e) => {
   mouseY = (e.clientY / window.innerHeight - 0.5) * 2;
 }, { passive: true });
 
+let currentBaseZ = baseCameraZ();
 function onResize() {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  currentBaseZ = baseCameraZ(); // re-frame on orientation change / window resize
 }
 window.addEventListener('resize', onResize);
 
@@ -585,7 +720,7 @@ function animate() {
   cross.position.y = -scrollProgress * 0.9;
   const s = 1 - scrollProgress * 0.18;
   cross.scale.set(s, s, s);
-  crossMat.opacity = 1;
+  halo.rotation.z = -t * 0.08; // the nimbus drifts independently of the cross itself
 
   glowSprite.position.copy(cross.position);
   glowSprite.material.opacity = Math.max(0, 1 - scrollProgress * 1.3);
@@ -599,7 +734,7 @@ function animate() {
   targetY += (mouseY - targetY) * 0.045;
   camera.position.x = 0.6 + targetX * 0.85;
   camera.position.y = 0.1 - targetY * 0.45;
-  camera.position.z = (simplified ? 8.6 : 7.4) + scrollProgress * 2.2;
+  camera.position.z = currentBaseZ + scrollProgress * 2.2;
   camera.lookAt(0, -scrollProgress * 0.9, 0);
 
   tickParticles(backLayer, dt);
@@ -764,6 +899,22 @@ if (reduceMotion) {
         chips.forEach(function (chip) { gsap.to(chip, { x: 0, y: 0, duration: 0.8, ease: 'power3.out' }); });
       });
     }
+  }
+
+  // ── Sacred icon frames — 3D tilt toward the cursor ──
+  if (fineHover && !reduceMotion) {
+    document.querySelectorAll('.icon-frame').forEach(function (frame) {
+      var rx = gsap.quickTo(frame, 'rotationX', { duration: 0.5, ease: 'power2.out' });
+      var ry = gsap.quickTo(frame, 'rotationY', { duration: 0.5, ease: 'power2.out' });
+      frame.addEventListener('mousemove', function (e) {
+        var r = frame.getBoundingClientRect();
+        var px = (e.clientX - r.left) / r.width - 0.5;
+        var py = (e.clientY - r.top) / r.height - 0.5;
+        rx(-py * 12);
+        ry(px * 12);
+      });
+      frame.addEventListener('mouseleave', function () { rx(0); ry(0); });
+    });
   }
 
   // ── Marquee (paused on reduced motion) ──
