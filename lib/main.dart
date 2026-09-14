@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show RenderRepaintBoundary;
+import 'package:flutter/services.dart' show SystemChrome, SystemUiMode;
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -11,6 +12,8 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
+import 'package:http/http.dart' as http;
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
@@ -26,6 +29,36 @@ const String googleApiKey = 'AIzaSyA-X9y5ouviMuzRZ0xGIrKpst5m0XpF2F8';
 const String emailjsServiceId = 'service_b0dal6k';
 const String emailjsTemplateId = 'template_2wygczm';
 const String emailjsPublicKey = 'f3q9dbEr5J5aicm4M';
+
+// ── AI Assistant (የነፍስ አባት አማካሪ) — Google Gemini API key. ──────────────
+// ⚠️ SECURITY: this key is embedded directly in the compiled APK. Anyone
+// can extract it by decompiling the app (this is true of ANY client-side
+// API key, not a Flutter-specific weakness). Before a PUBLIC release:
+//   1. Do NOT commit a real key to a public git remote — check your
+//      repo's visibility (Settings → General → Danger Zone on GitHub)
+//      before pushing a commit that contains one.
+//   2. Move the actual Gemini call server-side into a Firebase Cloud
+//      Function that the app calls instead (the app sends the user's
+//      question + Firebase Auth ID token; the function holds the real key
+//      and enforces rate limits itself). Because every Gemini call in this
+//      file goes through GeminiService below, that migration is a
+//      one-file change: swap GeminiService.ask()'s HTTP target.
+// Leave this empty to disable the feature gracefully (the chat screen
+// shows a "not configured yet" message instead of any network call).
+// ignore: constant_identifier_names
+const String GEMINI_API_KEY = 'AQ.Ab8RN6JJHjF4guB3FbZGB2oZU718ehr26jrZwyPFTgPZ47x1XQ';
+
+const String aiSystemPrompt =
+    'You are a humble, reverent assistant for the Ethiopian Orthodox '
+    'Tewahedo Church, helping believers understand their faith — fasting '
+    'rules, feasts, saints, the Synaxarium, confession preparation, and '
+    'prayers. Answer accurately and respectfully. Reply in the same '
+    'language the user writes in (Amharic or English). Admit uncertainty '
+    'humbly rather than guessing. For any personal spiritual matter, '
+    'confession, or authoritative ruling, always encourage the user to '
+    'consult their spiritual father (የነፍስ አባት) or parish priest. Never '
+    'present yourself as a replacement for a priest. Keep answers concise '
+    'and warm.';
 
 Future<bool> sendEmailCode(String toEmail, String code, String purpose) async {
   if (emailjsServiceId.isEmpty || emailjsTemplateId.isEmpty || emailjsPublicKey.isEmpty) {
@@ -70,6 +103,7 @@ final FlutterLocalNotificationsPlugin notificationsPlugin =
     FlutterLocalNotificationsPlugin();
 
 final ValueNotifier<double> fontSizeNotifier = ValueNotifier<double>(1.0);
+final ValueNotifier<bool> angelVisibleNotifier = ValueNotifier<bool>(true);
 
 Future<void> initNotifications() async {
   tzdata.initializeTimeZones();
@@ -103,7 +137,7 @@ Future<void> initNotifications() async {
   await androidImpl?.requestExactAlarmsPermission();
 }
 
-Future<void> schedulePrayerNotification(int id, int hour, int minute, String label) async {
+Future<void> schedulePrayerNotification(int id, int hour, int minute, String label, {String? body}) async {
   await notificationsPlugin.cancel(id);
 
   final AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
@@ -127,7 +161,7 @@ Future<void> schedulePrayerNotification(int id, int hour, int minute, String lab
   await notificationsPlugin.zonedSchedule(
     id,
     '🕯 $label',
-    'It is time for your prayer — ጸሎት ጊዜ ነው',
+    body ?? 'It is time for your prayer — ጸሎት ጊዜ ነው',
     scheduled,
     NotificationDetails(android: androidDetails),
     androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
@@ -138,6 +172,28 @@ Future<void> schedulePrayerNotification(int id, int hour, int minute, String lab
 
 Future<void> cancelNotification(int id) async =>
     await notificationsPlugin.cancel(id);
+
+// Penance reminders reuse schedulePrayerNotification/cancelNotification —
+// they just need their own id range so they never collide with the fixed
+// prayer-slot ids (0-3) or the confession reminder id (999). Stable per-item
+// ids are hashed into [2000, 2999); with the small number of penance items a
+// person realistically tracks at once, collisions are practically a
+// non-issue, and the worst case if one ever happened is simply that the
+// second scheduled reminder silently overwrites the first (same behavior as
+// scheduling any notification id twice) rather than a crash.
+int penanceNotificationId(String penanceItemId) => 2000 + (penanceItemId.hashCode.abs() % 1000);
+
+Future<void> schedulePenanceReminder(PenanceItem item) async {
+  if (!item.reminderEnabled || item.reminderHour == null || item.reminderMinute == null) return;
+  await schedulePrayerNotification(
+    penanceNotificationId(item.id), item.reminderHour!, item.reminderMinute!,
+    '${item.type} — ${item.amharic}',
+    body: 'Time for your penance — የንስሐ ስራ ጊዜ ነው',
+  );
+}
+
+Future<void> cancelPenanceReminder(String penanceItemId) async =>
+    await cancelNotification(penanceNotificationId(penanceItemId));
 
 Future<void> showConfessionNotification() async {
   const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
@@ -264,6 +320,114 @@ class FastingPeriod {
   }
 }
 
+/// Bilingual teaching content for the fasting tracker's "Why We Fast"
+/// section — the reason, duration, and typical practice for each of the
+/// EOTC's fasts, both the year-long weekly ones and the named seasons.
+///
+/// NOTE (for the app's maintainer): this content is meant to be reviewed
+/// by a priest before being treated as authoritative. Two entries in
+/// particular deserve a closer look — Gahad's exact eve-shifting rule
+/// (moved earlier when the eve falls on a Saturday or Sunday) and Tsige's
+/// date range and how strictly it's kept as a dietary fast versus mainly
+/// through hymnody — both vary somewhat by local tradition and are noted
+/// as such below rather than stated as fixed rules.
+class FastExplanation {
+  final String nameEn, nameAm;
+  final String reasonEn, reasonAm;
+  final String durationEn, durationAm;
+  final String practiceEn, practiceAm;
+  const FastExplanation({
+    required this.nameEn, required this.nameAm,
+    required this.reasonEn, required this.reasonAm,
+    required this.durationEn, required this.durationAm,
+    required this.practiceEn, required this.practiceAm,
+  });
+}
+
+const List<FastExplanation> fastExplanations = [
+  FastExplanation(
+    nameEn: 'Wednesday', nameAm: 'ረቡዕ',
+    reasonEn: 'A weekly fast commemorating the day the religious leaders took counsel to betray Christ — the day Judas agreed to hand him over.',
+    reasonAm: 'የአይሁድ ሊቃነ ካህናትና ሽማግሌዎች ጌታን አሳልፎ ለመስጠት የተማከሩበት፣ ይሁዳም ለክህደት የተስማማበት ቀን ተብሎ በየሳምንቱ የሚጾም ጾም።',
+    durationEn: 'Every week, year-round — except the 50 joyful days from Fasika to Pentecost, and Nativity–Epiphany',
+    durationAm: 'በየሳምንቱ፣ ዓመቱን ሙሉ — ከትንሳኤ እስከ በዓለ ሃምሳ ካሉት ደስታ ቀናት እና ከልደት እስከ ጥምቀት ካሉት ቀናት በስተቀር',
+    practiceEn: 'Abstinence from animal products (meat, dairy, eggs) until a set hour, per standard EOTC fasting discipline.',
+    practiceAm: 'እንደ ተዋሕዶ ቤተ ክርስቲያን ልማድ፣ እስከ ተወሰነ ሰዓት ድረስ ከስጋ፣ ከወተትና ከዕንቁላል ውጤቶች መታቀብ።',
+  ),
+  FastExplanation(
+    nameEn: 'Friday', nameAm: 'ዓርብ',
+    reasonEn: 'A weekly fast commemorating the Crucifixion of our Lord Jesus Christ.',
+    reasonAm: 'የጌታችን የኢየሱስ ክርስቶስ ስቅለት የሚታሰብበት፣ በየሳምንቱ የሚጾም ጾም።',
+    durationEn: 'Every week, year-round — with the same exceptions as Wednesday',
+    durationAm: 'በየሳምንቱ፣ ዓመቱን ሙሉ — እንደ ረቡዕ ተመሳሳይ ልዩ ሁኔታዎች',
+    practiceEn: 'Abstinence from animal products until a set hour, per standard EOTC fasting discipline.',
+    practiceAm: 'እስከ ተወሰነ ሰዓት ድረስ ከእንስሳት ውጤቶች መታቀብ።',
+  ),
+  FastExplanation(
+    nameEn: "Nineveh's Fast", nameAm: 'ጾመ ነነዌ',
+    reasonEn: 'Remembers the repentance of the people of Nineveh at the preaching of the prophet Jonah, who turned from sin after his three days in the great fish.',
+    reasonAm: 'ነቢዩ ዮናስ በዓሣ ነባሪ ሆድ ውስጥ ለሦስት ቀናት ከቆየ በኋላ የነነዌ ሰዎች ስብከቱን ሰምተው ንስሐ የገቡበትን ትውስታ የያዘ ጾም።',
+    durationEn: '3 days, roughly two and a half weeks before Great Lent begins',
+    durationAm: 'ዐቢይ ጾም ከመጀመሩ ከሁለት ሳምንት ተኩል ገደማ በፊት ለ፫ ቀናት',
+    practiceEn: 'A strict fast for many observant members — some keep it as strictly as Great Lent itself.',
+    practiceAm: 'ለብዙ ምዕመናን ጥብቅ ጾም ሲሆን አንዳንዶች እንደ ዐቢይ ጾም አድርገው ይይዙታል።',
+  ),
+  FastExplanation(
+    nameEn: 'Great Lent (Hudade)', nameAm: 'ዐቢይ ጾም / ሁዳዴ',
+    reasonEn: "Follows Christ's forty days of fasting and prayer in the wilderness (Matthew 4:1-11), extended to include the events of Holy Week leading to the Resurrection.",
+    reasonAm: 'ጌታችን ኢየሱስ ክርስቶስ በገዳመ ቆሮንቶስ ለ40 ቀናት የጾመውን ጾም (ማቴዎስ 4፡1-11) ተከትሎ፣ የሰሙነ ሕማማትን ጨምሮ የሚጾም ጾም።',
+    durationEn: '55 days, ending on Fasika (Easter)',
+    durationAm: '55 ቀናት፣ እስከ ትንሳኤ ድረስ',
+    practiceEn: 'The strictest and most solemn fast of the year — full abstinence from animal products; many also reduce meals to once daily until a set hour.',
+    practiceAm: 'ከዓመቱ ጾሞች ሁሉ በጣም ጥብቁና የተከበረው ጾም ነው — ከእንስሳት ውጤቶች ሁሉ መታቀብ፣ ብዙዎችም ምግብን እስከ ተወሰነ ሰዓት ድረስ ወደ አንድ ጊዜ ይቀንሳሉ።',
+  ),
+  FastExplanation(
+    nameEn: "Apostles' Fast", nameAm: 'ጾመ ሐዋርያት',
+    reasonEn: 'Commemorates the apostles fasting and praying together after receiving the Holy Spirit at Pentecost, before setting out to preach the Gospel to the world.',
+    reasonAm: 'ሐዋርያት መንፈስ ቅዱስን በበዓለ ሃምሳ ከተቀበሉ በኋላ ወንጌልን ለዓለም ለመስበክ ከመሰማራታቸው በፊት አብረው የጾሙትንና የጸለዩትን መታሰቢያ የያዘ ጾም።',
+    durationEn: 'Begins the Monday after Pentecost (50 days after Fasika) and ends Hamle 5 — the length varies with the date of Fasika each year',
+    durationAm: 'ትንሳኤ ከ50 ቀናት በኋላ ካለው በዓለ ሃምሳ ማግስት ጀምሮ እስከ ሐምሌ 5 ድረስ — ርዝመቱ በየዓመቱ እንደ ትንሳኤ ቀን ይለያያል',
+    practiceEn: 'Abstinence from animal products, observed with the standard weekday fasting discipline.',
+    practiceAm: 'ከእንስሳት ውጤቶች መታቀብ፣ በተለመደው የጾም ሥርዓት።',
+  ),
+  FastExplanation(
+    nameEn: 'Fast of the Assumption (Filseta)', nameAm: 'ጾመ ፍልሰታ',
+    reasonEn: "Kept in the pattern of the apostles, who fasted and prayed to be gathered from the ends of the earth to witness the falling asleep and assumption of the Virgin Mary's body into heaven.",
+    reasonAm: 'ሐዋርያት ከዓለም ዳርቻ ተሰብስበው የእመቤታችንን ፍልሰተ ስጋ ለማየት የጾሙትንና የጸለዩትን ምሳሌ ተከትሎ የሚጾም ጾም።',
+    durationEn: '15 days, Nehase 1–15 (roughly Aug 7–21)',
+    durationAm: '15 ቀናት፣ ከነሐሴ 1 እስከ 15',
+    practiceEn: 'Abstinence from animal products, concluding with the feast of ፍልሰታ ማርያም on Nehase 16.',
+    practiceAm: 'ከእንስሳት ውጤቶች መታቀብ፣ በነሐሴ 16 በፍልሰታ ማርያም በዓል ያበቃል።',
+  ),
+  FastExplanation(
+    nameEn: 'Gahad', nameAm: 'ጾመ ገሃድ',
+    reasonEn: 'The eve fasts before the two great feasts of Genna (Nativity) and Timkat (Epiphany) — a day of preparation and vigil before the celebration begins.',
+    reasonAm: 'ከልደትና ከጥምቀት በዓላት በፊት የሚጾሙ የዋዜማ ጾሞች — ለበዓሉ መዘጋጃ የሚሆኑ የንቃት ቀናት።',
+    durationEn: 'Two separate days: Tahsas 28 (Nativity eve) and Tir 10 (Epiphany eve) — commonly moved a day earlier if the eve would fall on a Saturday or Sunday (confirm the exact rule with your priest).',
+    durationAm: 'ሁለት የተለያዩ ቀናት፦ ታኅሳስ 28 (የልደት ዋዜማ) እና ጥር 10 (የጥምቀት ዋዜማ) — ዋዜማው ቅዳሜ ወይም እሁድ ላይ ቢውል ወደ ቀድሞ ቀን የመቀየር ልማድ አለ (ትክክለኛውን ሥርዓት ከካህንዎ ያረጋግጡ)።',
+    practiceEn: 'A strict single-day fast, often kept without food until later in the day.',
+    practiceAm: 'ጥብቅ የአንድ ቀን ጾም ሲሆን ብዙ ጊዜ እስከ ዕለቱ መገባደጃ ድረስ ያለ ምግብ ይያዛል።',
+  ),
+  FastExplanation(
+    nameEn: "Advent / Nativity Fast (Prophets' Fast)", nameAm: 'ጾመ ነቢያት / ጾመ ልደት',
+    reasonEn: 'Prepares the faithful for the Nativity of Christ, recalling the prophets who foretold His coming and the long expectation of Israel.',
+    reasonAm: 'ጌታችን ኢየሱስ ክርስቶስ መወለዱን አስቀድመው የተናገሩትን ነቢያት እየተዘከረ ለጌታ ልደት ምዕመናንን የሚያዘጋጅ ጾም።',
+    durationEn: '43 days, Hidar 15 – Tahsas 28 (late November to late December)',
+    durationAm: '43 ቀናት፣ ከኅዳር 15 እስከ ታኅሳስ 28',
+    practiceEn: 'Abstinence from animal products, with the standard weekday fasting discipline.',
+    practiceAm: 'ከእንስሳት ውጤቶች መታቀብ፣ በተለመደው የጾም ሥርዓት።',
+  ),
+  FastExplanation(
+    nameEn: 'Fast of the Flowers (Tsige)', nameAm: 'ጾመ ጽጌ',
+    reasonEn: "A season of hymns in honor of the Virgin Mary, traditionally connected to the Holy Family's flight into Egypt to escape King Herod.",
+    reasonAm: 'ንዑድ እመቤታችን ማርያምን የሚያመሰግኑ ውዳሴዎች የሚቀርቡበት፣ ከሄሮድስ ስደት ጋር በተያያዘ የሚታሰብ ወቅት።',
+    durationEn: 'Roughly a month, within Hidar/Tahsas before the Nativity fast — exact dates and how strictly it is kept as a dietary fast vary by local tradition, so confirm with your priest.',
+    durationAm: 'በኅዳር/ታኅሳስ ወር ውስጥ ወደ አንድ ወር የሚቆይ — ትክክለኛ ቀናቱና እንደ ምግብ ጾም ምን ያህል ጥብቅ እንደሚያዝ እንደየ አጥቢያው ስለሚለያይ ከካህንዎ ያረጋግጡ።',
+    practiceEn: 'Kept mainly through special hymns (Melkea) for much of the laity, alongside fasting practices that vary by tradition.',
+    practiceAm: 'በአብዛኛው በምዕመናን ዘንድ በልዩ ውዳሴ (መልክዕ) የሚከበር ሲሆን፣ ከዚያ ጋር አብሮ የሚያዝ የጾም ልማድ እንደየ አጥቢያው ይለያያል።',
+  ),
+];
+
 /// The named EOTC fasting periods that fall within (or overlap) the
 /// given Gregorian year.
 List<FastingPeriod> fastingPeriodsForYear(int gregorianYear) {
@@ -328,6 +492,55 @@ FastingPeriod? currentFastingPeriod(DateTime date) {
 }
 
 // ═══════════════════════════════════════════════
+// FEAST COUNTDOWN — days remaining until the next major annual feast
+// ═══════════════════════════════════════════════
+
+class FeastCountdown {
+  final String nameEn;
+  final String nameAm;
+  final DateTime date; // Gregorian, date-only
+  final int daysRemaining; // 0 if today is the feast
+  const FeastCountdown({required this.nameEn, required this.nameAm, required this.date, required this.daysRemaining});
+}
+
+/// The five major annual EOTC feasts theming/countdown features care about,
+/// as fixed Ethiopian-calendar (month, day) pairs. Fasika (Easter) is
+/// handled separately below since it's a movable feast computed via
+/// [orthodoxEaster] rather than a fixed day.
+const List<List<Object>> _majorFixedFeasts = [
+  [1, 17, 'Meskel (Finding of the True Cross)', 'መስቀል'],
+  [4, 29, 'Genna (Ethiopian Christmas)', 'ገና'],
+  [5, 11, 'Timkat (Epiphany)', 'ጥምቀት'],
+  [12, 16, 'Filseta (Assumption of Mary)', 'ፍልሰታ'],
+];
+
+/// Nearest future Gregorian occurrence of a fixed Ethiopian-calendar
+/// (month, day), searching this Ethiopian year and next so it always
+/// finds something regardless of where in the year "today" falls.
+DateTime _nearestFutureEthiopianAnniversary(int month, int day, DateTime today) {
+  final ethYear = EthiopianCalendar.today().year;
+  final thisYear = _dateOnly(EthiopianCalendar.toGregorian(day, month, ethYear));
+  if (!thisYear.isBefore(today)) return thisYear;
+  return _dateOnly(EthiopianCalendar.toGregorian(day, month, ethYear + 1));
+}
+
+/// The next of the five major annual feasts (ገና/ጥምቀት/ፋሲካ/መስቀል/ፍልሰታ). If
+/// today is one of them, it's returned with daysRemaining == 0.
+FeastCountdown nextMajorFeast({DateTime? from}) {
+  final today = _dateOnly(from ?? DateTime.now());
+  final candidates = <FeastCountdown>[];
+  for (final f in _majorFixedFeasts) {
+    final date = _nearestFutureEthiopianAnniversary(f[0] as int, f[1] as int, today);
+    candidates.add(FeastCountdown(nameEn: f[2] as String, nameAm: f[3] as String, date: date, daysRemaining: date.difference(today).inDays));
+  }
+  var fasika = _dateOnly(orthodoxEaster(today.year));
+  if (fasika.isBefore(today)) fasika = _dateOnly(orthodoxEaster(today.year + 1));
+  candidates.add(FeastCountdown(nameEn: 'Fasika (Easter)', nameAm: 'ፋሲካ', date: fasika, daysRemaining: fasika.difference(today).inDays));
+  candidates.sort((a, b) => a.daysRemaining.compareTo(b.daysRemaining));
+  return candidates.first;
+}
+
+// ═══════════════════════════════════════════════
 // USER MODEL
 // ═══════════════════════════════════════════════
 
@@ -353,6 +566,77 @@ class UserProfile {
     age: j['age'] ?? 0, gender: j['gender'] ?? '', role: j['role'] ?? '',
     password: j['password'] ?? '', verified: j['verified'] ?? false,
   );
+}
+
+// ═══════════════════════════════════════════════
+// FAMILY / GROUP MODE
+// ═══════════════════════════════════════════════
+
+class FamilyGroup {
+  final String id; // Firestore doc id, not stored in the doc body itself
+  final String name;
+  final String createdBy;
+  final List<String> memberUids;
+  final String inviteCode;
+  final DateTime? createdAt;
+  const FamilyGroup({
+    required this.id, required this.name, required this.createdBy,
+    required this.memberUids, required this.inviteCode, this.createdAt,
+  });
+  factory FamilyGroup.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
+    final j = doc.data() ?? {};
+    return FamilyGroup(
+      id: doc.id,
+      name: j['name'] ?? '',
+      createdBy: j['createdBy'] ?? '',
+      memberUids: List<String>.from(j['memberUids'] ?? const []),
+      inviteCode: j['inviteCode'] ?? '',
+      createdAt: (j['createdAt'] as Timestamp?)?.toDate(),
+    );
+  }
+}
+
+/// A family member's display info, assembled by reading users/{uid} for
+/// each uid in a FamilyGroup.memberUids — not a Firestore doc of its own.
+class FamilyMember {
+  final String uid;
+  final String name;
+  final int streak;
+  final bool prayedToday;
+  const FamilyMember({required this.uid, required this.name, required this.streak, required this.prayedToday});
+}
+
+class PrayerRequest {
+  final String id;
+  final String authorUid;
+  final String authorName;
+  final String text;
+  final DateTime? createdAt;
+  final List<String> prayedByUids;
+  const PrayerRequest({
+    required this.id, required this.authorUid, required this.authorName,
+    required this.text, this.createdAt, required this.prayedByUids,
+  });
+  int get prayedCount => prayedByUids.length;
+  factory PrayerRequest.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
+    final j = doc.data() ?? {};
+    return PrayerRequest(
+      id: doc.id,
+      authorUid: j['authorUid'] ?? '',
+      authorName: j['authorName'] ?? '',
+      text: j['text'] ?? '',
+      createdAt: (j['createdAt'] as Timestamp?)?.toDate(),
+      prayedByUids: List<String>.from(j['prayedByUids'] ?? const []),
+    );
+  }
+}
+
+/// Random 6-char invite code from a charset that excludes visually
+/// ambiguous characters (0/O, 1/I) so it's easy to read aloud or retype.
+String generateInviteCode({int length = 6}) {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  final rand = math.Random.secure();
+  return List.generate(length, (_) => chars[rand.nextInt(chars.length)]).join();
 }
 
 // ═══════════════════════════════════════════════
@@ -428,20 +712,35 @@ class PenanceItem {
   int completedCount;
   String frequency;
   bool finished;
+  String id;
+  bool reminderEnabled;
+  int? reminderHour;
+  int? reminderMinute;
   PenanceItem({
     required this.type, required this.amharic, required this.icon,
     required this.totalCount, required this.completedCount,
     required this.frequency, this.finished = false,
-  });
+    String? id, this.reminderEnabled = false, this.reminderHour, this.reminderMinute,
+  }) : id = id ?? '${DateTime.now().microsecondsSinceEpoch}';
   Map<String, dynamic> toJson() => {
     'type': type, 'amharic': amharic, 'icon': icon,
     'totalCount': totalCount, 'completedCount': completedCount,
     'frequency': frequency, 'finished': finished,
+    'id': id, 'reminderEnabled': reminderEnabled,
+    'reminderHour': reminderHour, 'reminderMinute': reminderMinute,
   };
+  // NOTE: 'id' falls back to a freshly-generated value when absent so
+  // PenanceItem lists saved before this field existed still load fine —
+  // callers that mutate an old-shape list should re-save promptly so the
+  // generated id becomes permanent instead of regenerating every launch.
   factory PenanceItem.fromJson(Map<String, dynamic> j) => PenanceItem(
     type: j['type'], amharic: j['amharic'], icon: j['icon'],
     totalCount: j['totalCount'], completedCount: j['completedCount'],
     frequency: j['frequency'], finished: j['finished'] ?? false,
+    id: j['id'] as String?,
+    reminderEnabled: j['reminderEnabled'] ?? false,
+    reminderHour: j['reminderHour'] as int?,
+    reminderMinute: j['reminderMinute'] as int?,
   );
 }
 
@@ -661,6 +960,8 @@ const List<Achievement> allAchievements = [
   Achievement(id: 'first_prayer', emoji: '🙏', titleEn: 'First Prayer', titleAm: 'የመጀመሪያ ጸሎት', hint: 'Set a daily prayer reminder on Home'),
   Achievement(id: 'calendar_explorer', emoji: '📅', titleEn: 'Calendar Explorer', titleAm: 'የቀን መቁጠሪያ አሳሽ', hint: 'Open the Orthodox calendar'),
   Achievement(id: 'found_church', emoji: '⛪', titleEn: 'Found a Church', titleAm: 'ቤተ ክርስቲያን አገኙ', hint: 'Find a church on the map'),
+  Achievement(id: 'focus_1', emoji: '🕯️', titleEn: 'First Focus Session', titleAm: 'የመጀመሪያ የማተኮሪያ ጊዜ', hint: 'Complete a Focus Mode session'),
+  Achievement(id: 'focus_10', emoji: '🕯️', titleEn: '10 Focus Sessions', titleAm: '፲ የማተኮሪያ ጊዜያት', hint: 'Complete 10 Focus Mode sessions'),
 ];
 
 /// Marks [id] unlocked if it wasn't already. Returns true only the first
@@ -697,6 +998,26 @@ Future<void> maybeUnlockAchievement(BuildContext context, String id, bool isDark
   final isNew = await unlockAchievement(id);
   if (isNew && context.mounted) {
     _showAchievementToast(context, allAchievements.firstWhere((a) => a.id == id), isDark);
+  }
+}
+
+// Mirrors the local (SharedPreferences) prayer/confession streak into
+// users/{uid} so Family Mode can show every member's streak without them
+// needing to be online at the same moment. Fire-and-forget: a signed-out
+// user or a failed write must never interrupt the local-first streak flow
+// that already succeeded, so failures are swallowed silently.
+Future<void> dualWriteStreakToFirestore(int streak, int longest, String lastCheckInDate) async {
+  final uid = FirebaseAuth.instance.currentUser?.uid;
+  if (uid == null) return;
+  try {
+    await FirebaseFirestore.instance.collection('users').doc(uid).update({
+      'currentStreak': streak,
+      'longestStreak': longest,
+      'lastCheckInDate': lastCheckInDate,
+    });
+  } catch (_) {
+    // Offline, no Firestore doc yet, or a transient error — the local
+    // streak already saved successfully, so there's nothing to roll back.
   }
 }
 
@@ -791,6 +1112,7 @@ class _YenefsAbatAppState extends State<YenefsAbatApp> {
   Future<void> _loadProfile() async {
     final prefs = await SharedPreferences.getInstance();
     fontSizeNotifier.value = prefs.getDouble('font_size') ?? 1.0;
+    angelVisibleNotifier.value = prefs.getBool('angel_visible') ?? true;
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user != null) {
@@ -1082,6 +1404,14 @@ class _SignInScreenState extends State<SignInScreen> {
         'gender': _gender,
         'role': _role,
         'createdAt': FieldValue.serverTimestamp(),
+        // Mirrors of the local (SharedPreferences) streak state, kept in
+        // sync so Family Mode can show every member's streak without each
+        // member needing to be online at the same time. See
+        // dualWriteStreakToFirestore().
+        'currentStreak': 0,
+        'longestStreak': 0,
+        'lastCheckInDate': '',
+        'familyId': null,
       });
       // Send Firebase's official verification LINK (from Google servers — less Spam)
       await user.sendEmailVerification();
@@ -1426,6 +1756,274 @@ class _SignInScreenState extends State<SignInScreen> {
   );
 }
 
+// ═══════════════════════════════════════════════
+// FLOATING GUARDIAN ANGEL — draggable AI companion overlay
+// ═══════════════════════════════════════════════
+
+/// Draws a stylized, iconography-inspired angel: a robed silhouette, halo
+/// ring, and a pair of gently swaying wings — abstract brushwork rather
+/// than a cartoon mascot, in keeping with the app's reverent tone. Wings
+/// are built from layered individual feathers (fanning and shading each
+/// one separately) rather than a single solid shape, and the figure has
+/// folded hands, a draped robe with fold-lines, and a soft, almond-eyed
+/// face — closer to the restrained figures in Ethiopian iconography.
+class _AngelPainter extends CustomPainter {
+  final double wingPhase; // 0..1, drives the wing sway
+  final double haloPhase; // 0..1, drives the halo's soft pulse
+  const _AngelPainter({required this.wingPhase, required this.haloPhase});
+
+  static const Color _gold = Color(0xFFF0D68C);
+  static const Color _goldMid = Color(0xFFD9B65E);
+  static const Color _goldDeep = Color(0xFF9A7A32);
+  static const Color _ivory = Color(0xFFFFF6DE);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height * 0.56);
+    final bw = size.width * 0.20, bh = size.height * 0.38;
+
+    // Soft outer glow.
+    canvas.drawCircle(center, size.width * 0.38,
+        Paint()..color = _gold.withAlpha((55 + haloPhase * 35).round())..maskFilter = const MaskFilter.blur(BlurStyle.normal, 15));
+
+    // Wings, swaying gently on a sine cycle, drawn behind the body.
+    final sway = math.sin(wingPhase * 2 * math.pi) * 0.14;
+    final shoulder = Offset(center.dx, center.dy - bh * 0.12);
+    _wing(canvas, shoulder, size, sway, mirrored: false);
+    _wing(canvas, shoulder, size, sway, mirrored: true);
+
+    // Halo — two concentric rings for depth, floating above the head.
+    final haloCenter = Offset(center.dx, center.dy - bh * 1.14);
+    final haloRect = Rect.fromCenter(center: haloCenter, width: size.width * 0.30, height: size.height * 0.095);
+    canvas.drawOval(haloRect.inflate(2.2), Paint()
+      ..color = _gold.withAlpha((70 + haloPhase * 60).round())
+      ..style = PaintingStyle.stroke..strokeWidth = 3.2
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2.4));
+    canvas.drawOval(haloRect, Paint()
+      ..color = _ivory.withAlpha((190 + haloPhase * 65).round())
+      ..style = PaintingStyle.stroke..strokeWidth = 1.3);
+
+    // Robed body — a bell-shaped silhouette, shaded with a radial
+    // gradient so it reads as rounded rather than a flat cutout.
+    final bodyTop = Offset(center.dx, center.dy - bh * 0.22);
+    final bodyPath = ui.Path()
+      ..moveTo(bodyTop.dx, bodyTop.dy)
+      ..quadraticBezierTo(center.dx + bw, center.dy, center.dx + bw * 0.62, center.dy + bh * 0.66)
+      ..quadraticBezierTo(center.dx, center.dy + bh * 0.86, center.dx - bw * 0.62, center.dy + bh * 0.66)
+      ..quadraticBezierTo(center.dx - bw, center.dy, bodyTop.dx, bodyTop.dy)
+      ..close();
+    canvas.drawPath(bodyPath, Paint()..shader = RadialGradient(center: const Alignment(-0.3, -0.6), radius: 1.1, colors: [_ivory, _gold, _goldDeep])
+        .createShader(bodyPath.getBounds()));
+    // Drapery fold lines — a few soft strokes to suggest fabric.
+    final foldPaint = Paint()..color = _goldDeep.withAlpha(90)..style = PaintingStyle.stroke..strokeWidth = 1.1;
+    for (final dx in [-0.28, 0.0, 0.30]) {
+      final fx = center.dx + bw * dx;
+      canvas.drawPath(
+        ui.Path()
+          ..moveTo(fx, center.dy - bh * 0.05)
+          ..quadraticBezierTo(fx + bw * 0.08, center.dy + bh * 0.35, fx + bw * 0.04, center.dy + bh * 0.72),
+        foldPaint,
+      );
+    }
+
+    // Folded hands / sleeves, crossed at the chest — a common gesture in
+    // icon painting, and it reads as more figure-like than bare arms.
+    final handsCenter = Offset(center.dx, center.dy - bh * 0.02);
+    canvas.drawOval(Rect.fromCenter(center: handsCenter, width: bw * 0.62, height: bh * 0.16),
+        Paint()..shader = LinearGradient(colors: [_gold, _goldMid]).createShader(Rect.fromCenter(center: handsCenter, width: bw * 0.62, height: bh * 0.16)));
+
+    // Head — softly shaded, with the faintest suggestion of a serene,
+    // almond-eyed face rather than literal cartoon features.
+    final headCenter = Offset(center.dx, center.dy - bh * 0.48);
+    final headRadius = size.width * 0.10;
+    canvas.drawOval(Rect.fromCenter(center: headCenter, width: headRadius * 1.86, height: headRadius * 2.15),
+        Paint()..shader = RadialGradient(center: const Alignment(-0.25, -0.4), colors: [_ivory, _gold, _goldMid]).createShader(Rect.fromCircle(center: headCenter, radius: headRadius)));
+    final eyePaint = Paint()..color = _goldDeep.withAlpha(150)..style = PaintingStyle.stroke..strokeWidth = 1.0..strokeCap = StrokeCap.round;
+    for (final dx in [-0.34, 0.34]) {
+      final ex = headCenter.dx + headRadius * dx;
+      final ey = headCenter.dy - headRadius * 0.02;
+      canvas.drawArc(Rect.fromCenter(center: Offset(ex, ey), width: headRadius * 0.5, height: headRadius * 0.28), 0.15, math.pi - 0.3, false, eyePaint);
+    }
+  }
+
+  void _wing(Canvas canvas, Offset shoulder, Size size, double sway, {required bool mirrored}) {
+    final dir = mirrored ? -1.0 : 1.0;
+    canvas.save();
+    canvas.translate(shoulder.dx, shoulder.dy);
+    canvas.rotate(dir * (0.30 + sway));
+    final span = size.width * 0.50;
+    // Five layered feathers fanning from the shoulder, each its own
+    // tapered path so the wing reads as plumage rather than one shape.
+    const feathers = [0.42, 0.62, 0.80, 0.95, 1.0];
+    for (int i = 0; i < feathers.length; i++) {
+      final t = i / (feathers.length - 1); // 0 (top/leading) .. 1 (bottom/trailing)
+      final angle = -0.55 + t * 0.95;
+      final len = span * feathers[i];
+      final width = size.width * (0.10 - t * 0.02);
+      canvas.save();
+      canvas.rotate(dir * angle);
+      final feather = ui.Path()
+        ..moveTo(0, 0)
+        ..quadraticBezierTo(dir * len * 0.55, -width, dir * len, 0)
+        ..quadraticBezierTo(dir * len * 0.55, width * 0.55, 0, 0)
+        ..close();
+      final shade = (i / feathers.length);
+      canvas.drawPath(
+        feather,
+        Paint()
+          ..shader = LinearGradient(colors: [
+            Color.lerp(_gold, _goldMid, shade)!.withAlpha(235),
+            Color.lerp(_goldMid, _goldDeep, shade)!.withAlpha(170),
+          ]).createShader(feather.getBounds()),
+      );
+      canvas.drawPath(feather, Paint()..color = _goldDeep.withAlpha(60)..style = PaintingStyle.stroke..strokeWidth = 0.6);
+      canvas.restore();
+    }
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _AngelPainter old) => old.wingPhase != wingPhase || old.haloPhase != haloPhase;
+}
+
+/// A circular "light burst" reveal, expanding outward from [center] — used
+/// as the transition when the angel unfolds into the chat screen.
+class _CircleRevealClipper extends CustomClipper<ui.Path> {
+  final double fraction;
+  final Offset center;
+  const _CircleRevealClipper({required this.fraction, required this.center});
+  @override
+  ui.Path getClip(Size size) {
+    final maxRadius = math.sqrt(size.width * size.width + size.height * size.height);
+    return ui.Path()..addOval(Rect.fromCircle(center: center, radius: maxRadius * fraction));
+  }
+  @override
+  bool shouldReclip(covariant _CircleRevealClipper old) => old.fraction != fraction;
+}
+
+class FloatingAngelOverlay extends StatefulWidget {
+  final bool isDark;
+  const FloatingAngelOverlay({super.key, required this.isDark});
+  @override
+  State<FloatingAngelOverlay> createState() => _FloatingAngelOverlayState();
+}
+
+class _FloatingAngelOverlayState extends State<FloatingAngelOverlay> with SingleTickerProviderStateMixin {
+  static const double _size = 78;
+  late final AnimationController _floatController;
+  Offset? _position;
+  Offset _dragStart = Offset.zero;
+  Offset _positionAtDragStart = Offset.zero;
+  bool _dragging = false;
+  String? _blessing;
+  Timer? _blessingTimer;
+
+  static const List<Map<String, String>> _blessings = [
+    {'am': 'እግዚአብሔር ይባርክዎ 🕊️', 'en': 'God bless you 🕊️'},
+    {'am': 'ጸሎትዎ ይሰማ 🙏', 'en': 'May your prayer be heard 🙏'},
+    {'am': 'ሰላመ እግዚአብሔር ይብዛላችሁ ✨', 'en': "May God's peace be with you ✨"},
+    {'am': 'በእምነት ጸንተው ይኑሩ ☩', 'en': 'Stand firm in faith ☩'},
+    {'am': 'ዛሬም መልካም ቀን ይሁንልዎ 🌅', 'en': 'May today be blessed 🌅'},
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _floatController = AnimationController(vsync: this, duration: const Duration(seconds: 4))..repeat();
+    _scheduleBlessing();
+  }
+
+  // Rarely, and only when the angel is at rest, a short blessing appears
+  // for a few seconds and fades away on its own — never a prompt to act on.
+  void _scheduleBlessing() {
+    _blessingTimer?.cancel();
+    _blessingTimer = Timer(Duration(minutes: 3 + math.Random().nextInt(6)), () {
+      if (!mounted) return;
+      if (_dragging) { _scheduleBlessing(); return; }
+      final b = _blessings[math.Random().nextInt(_blessings.length)];
+      setState(() => _blessing = '${b['am']}\n${b['en']}');
+      Timer(const Duration(seconds: 4), () { if (mounted) setState(() => _blessing = null); });
+      _scheduleBlessing();
+    });
+  }
+
+  @override
+  void dispose() {
+    _floatController.dispose();
+    _blessingTimer?.cancel();
+    super.dispose();
+  }
+
+  void _openChat(BuildContext context) {
+    final box = context.findRenderObject() as RenderBox?;
+    final origin = box != null
+        ? box.localToGlobal(const Offset(_size / 2, _size / 2))
+        : MediaQuery.of(context).size.center(Offset.zero);
+    Navigator.push(context, PageRouteBuilder(
+      transitionDuration: const Duration(milliseconds: 650),
+      reverseTransitionDuration: const Duration(milliseconds: 300),
+      pageBuilder: (_, _, _) => AiAssistantScreen(isDark: widget.isDark),
+      transitionsBuilder: (context, animation, secondaryAnimation, child) {
+        final curved = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic);
+        return AnimatedBuilder(
+          animation: curved,
+          builder: (context, _) => ClipPath(clipper: _CircleRevealClipper(fraction: curved.value, center: origin), child: child),
+          child: child,
+        );
+      },
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final screenSize = MediaQuery.of(context).size;
+    _position ??= Offset(screenSize.width - _size - 16, screenSize.height - _size - 170);
+    return Positioned(
+      left: _position!.dx, top: _position!.dy,
+      child: GestureDetector(
+        onPanStart: (d) { _dragging = true; _dragStart = d.globalPosition; _positionAtDragStart = _position!; },
+        onPanUpdate: (d) => setState(() {
+          final next = _positionAtDragStart + (d.globalPosition - _dragStart);
+          _position = Offset(
+            next.dx.clamp(4, screenSize.width - _size - 4),
+            next.dy.clamp(40, screenSize.height - _size - 90),
+          );
+        }),
+        onPanEnd: (_) => _dragging = false,
+        onTap: () => _openChat(context),
+        child: AnimatedBuilder(
+          animation: _floatController,
+          builder: (context, child) {
+            final t = _floatController.value;
+            final floatY = math.sin(t * 2 * math.pi) * 6;
+            final haloPhase = (math.sin(t * 2 * math.pi * 1.3) + 1) / 2;
+            return Transform.translate(
+              offset: Offset(0, floatY),
+              child: Stack(clipBehavior: Clip.none, alignment: Alignment.topCenter, children: [
+                if (_blessing != null) Positioned(top: -58, child: _blessingBubble(_blessing!)),
+                SizedBox(width: _size, height: _size, child: CustomPaint(painter: _AngelPainter(wingPhase: t, haloPhase: haloPhase))),
+              ]),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _blessingBubble(String text) => Container(
+    constraints: const BoxConstraints(maxWidth: 180),
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+    decoration: BoxDecoration(
+      color: widget.isDark ? const Color(0xFF1E0A0A) : Colors.white,
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: const Color(0xFFC9A84C), width: 0.8),
+      boxShadow: [BoxShadow(color: Colors.black.withAlpha(60), blurRadius: 10, offset: const Offset(0, 3))],
+    ),
+    child: Text(text, textAlign: TextAlign.center,
+        style: TextStyle(fontSize: 11, height: 1.4, fontStyle: FontStyle.italic, color: widget.isDark ? const Color(0xFFE8D5A0) : const Color(0xFF2C1810))),
+  );
+}
+
 class MainScreen extends StatefulWidget {
   final bool isDark;
   final VoidCallback onToggleTheme;
@@ -1444,6 +2042,7 @@ class _MainScreenState extends State<MainScreen> {
       HomeScreen(isDark: widget.isDark, onToggleTheme: widget.onToggleTheme, profile: widget.profile, onNavigate: (i) => setState(() => _idx = i)),
       ConfessScreen(isDark: widget.isDark),
       CalendarScreen(isDark: widget.isDark),
+      FocusSetupScreen(isDark: widget.isDark),
       PenanceScreen(isDark: widget.isDark),
       PriestScreen(isDark: widget.isDark),
       MoreScreen(isDark: widget.isDark),
@@ -1452,12 +2051,19 @@ class _MainScreenState extends State<MainScreen> {
       {'icon': Icons.home_outlined, 'label': 'HOME'},
       {'icon': Icons.church_outlined, 'label': 'CONFESS'},
       {'icon': Icons.calendar_month_outlined, 'label': 'CALENDAR'},
+      {'icon': Icons.self_improvement_outlined, 'label': 'FOCUS'},
       {'icon': Icons.auto_stories_outlined, 'label': 'PENANCE'},
       {'icon': Icons.location_on_outlined, 'label': 'CHURCH'},
       {'icon': Icons.more_horiz, 'label': 'MORE'},
     ];
     return Scaffold(
-      body: screens[_idx],
+      body: Stack(children: [
+        screens[_idx],
+        ValueListenableBuilder<bool>(
+          valueListenable: angelVisibleNotifier,
+          builder: (context, visible, _) => visible ? FloatingAngelOverlay(isDark: widget.isDark) : const SizedBox.shrink(),
+        ),
+      ]),
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
           color: c.hero,
@@ -1475,18 +2081,19 @@ class _MainScreenState extends State<MainScreen> {
                   onTap: () => setState(() => _idx = i),
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 200),
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 6),
                     decoration: BoxDecoration(
                       color: active ? c.goldBg : Colors.transparent,
                       borderRadius: BorderRadius.circular(20),
                       border: active ? Border.all(color: c.gold.withAlpha(80), width: 0.5) : null,
                     ),
                     child: Column(mainAxisSize: MainAxisSize.min, children: [
-                      Icon(items[i]['icon'] as IconData, color: active ? c.gold : c.muted, size: 22),
+                      Icon(items[i]['icon'] as IconData, color: active ? c.gold : c.muted, size: 20),
                       const SizedBox(height: 3),
                       Text(items[i]['label'] as String,
-                          style: TextStyle(fontSize: 8, color: active ? c.gold : c.muted,
-                              letterSpacing: 1, fontWeight: active ? FontWeight.w700 : FontWeight.w400)),
+                          textScaler: TextScaler.noScaling,
+                          style: TextStyle(fontSize: 7.3, color: active ? c.gold : c.muted,
+                              letterSpacing: 0.4, fontWeight: active ? FontWeight.w700 : FontWeight.w400)),
                     ]),
                   ),
                 );
@@ -1578,9 +2185,11 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     final prefs = await SharedPreferences.getInstance();
     final newStreak = _streak + 1;
     final newLongest = newStreak > _longestStreak ? newStreak : _longestStreak;
+    final todayKey = _dateKey(DateTime.now());
     await prefs.setInt('streak_count', newStreak);
     await prefs.setInt('streak_longest', newLongest);
-    await prefs.setString('streak_last_checkin', _dateKey(DateTime.now()));
+    await prefs.setString('streak_last_checkin', todayKey);
+    unawaited(dualWriteStreakToFirestore(newStreak, newLongest, todayKey));
     setState(() {
       _streak = newStreak;
       _longestStreak = newLongest;
@@ -1718,7 +2327,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         body: SafeArea(
           child: SingleChildScrollView(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              _hero(c), _dateStrip(c),
+              _hero(c), _feastBanner(c), _dateStrip(c),
               _streakCard(c),
               _label('VERSE OF THE DAY', c), _verseCard(c),
               _label('TODAY\'S SAINT', c), _saintCard(c),
@@ -1733,7 +2342,33 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
   }
 
-  Widget _hero(AppColors c) => Container(
+  Widget _feastBanner(AppColors c) {
+    final feast = nextMajorFeast();
+    if (feast.daysRemaining != 0) return const SizedBox.shrink();
+    final onGold = widget.isDark ? const Color(0xFF0F0505) : Colors.white;
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(14, 14, 14, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(colors: [Color(0xFFE3C878), Color(0xFFC9A84C), Color(0xFFA98937)]),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [BoxShadow(color: c.gold.withAlpha(110), blurRadius: 16, offset: const Offset(0, 6))],
+      ),
+      child: Row(children: [
+        const Text('✨', style: TextStyle(fontSize: 26)),
+        const SizedBox(width: 12),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Happy ${feast.nameEn}!', style: TextStyle(color: onGold, fontWeight: FontWeight.w800, fontSize: 14)),
+          Text('መልካም ${feast.nameAm} በዓል!', style: TextStyle(color: onGold.withAlpha(210), fontSize: 12, fontStyle: FontStyle.italic)),
+        ])),
+      ]),
+    );
+  }
+
+  Widget _hero(AppColors c) {
+    final isFeastToday = nextMajorFeast().daysRemaining == 0;
+    return Container(
     width: double.infinity, color: c.hero,
     padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
     child: Column(children: [
@@ -1767,7 +2402,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         width: 110, height: 110,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          boxShadow: [BoxShadow(color: c.gold.withAlpha(60), blurRadius: 20, spreadRadius: 2)],
+          // A slightly warmer, wider glow on feast days — a subtle accent
+          // shift rather than touching AppColors globally, so every other
+          // screen's contrast stays exactly as it was.
+          boxShadow: [BoxShadow(color: (isFeastToday ? const Color(0xFFFFD700) : c.gold).withAlpha(isFeastToday ? 100 : 60), blurRadius: isFeastToday ? 30 : 20, spreadRadius: isFeastToday ? 4 : 2)],
         ),
         child: ClipOval(
           child: Image.asset('assets/images/logo.png', fit: BoxFit.cover),
@@ -1791,6 +2429,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       Text(_today.zemene, style: TextStyle(fontSize: 11, color: c.gold, letterSpacing: 1, fontStyle: FontStyle.italic)),
     ]),
   );
+  }
 
   Widget _dateStrip(AppColors c) {
     final now = DateTime.now();
@@ -2567,7 +3206,12 @@ class _PenanceScreenState extends State<PenanceScreen> {
     final raw = prefs.getString('penance_items');
     if (raw != null) {
       final list = jsonDecode(raw) as List;
+      final hadMissingId = list.any((e) => (e as Map)['id'] == null);
       setState(() => _items = list.map((e) => PenanceItem.fromJson(e)).toList());
+      // Items saved before the 'id' field existed get a freshly-generated
+      // one in PenanceItem.fromJson — persist it now so it's stable from
+      // here on, instead of regenerating on every future launch.
+      if (hadMissingId) await _saveData();
     }
   }
 
@@ -2581,6 +3225,8 @@ class _PenanceScreenState extends State<PenanceScreen> {
     PenanceType? selected;
     final countCtrl = TextEditingController();
     String frequency = 'Daily';
+    bool reminderOn = false;
+    TimeOfDay reminderTime = const TimeOfDay(hour: 6, minute: 0);
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -2647,6 +3293,44 @@ class _PenanceScreenState extends State<PenanceScreen> {
                   ),
                 )
               ).toList()),
+              const SizedBox(height: 16),
+              Row(children: [
+                Expanded(child: Text('Daily reminder', style: TextStyle(color: c.muted, fontSize: 12, fontWeight: FontWeight.w600))),
+                Switch(value: reminderOn, onChanged: (v) => setLocal(() => reminderOn = v), activeThumbColor: c.gold),
+              ]),
+              if (reminderOn)
+                GestureDetector(
+                  onTap: () async {
+                    final picked = await showTimePicker(
+                      context: ctx, initialTime: reminderTime, initialEntryMode: TimePickerEntryMode.dial,
+                      builder: (context, child) => Theme(
+                        data: Theme.of(context).copyWith(
+                          timePickerTheme: TimePickerThemeData(
+                            backgroundColor: c.card, hourMinuteColor: c.goldBg, hourMinuteTextColor: c.text,
+                            dayPeriodColor: c.goldBg, dayPeriodTextColor: c.gold, dialBackgroundColor: c.strip,
+                            dialHandColor: c.gold, dialTextColor: c.text, entryModeIconColor: c.gold,
+                            confirmButtonStyle: ButtonStyle(foregroundColor: WidgetStateProperty.all(c.gold)),
+                            cancelButtonStyle: ButtonStyle(foregroundColor: WidgetStateProperty.all(c.muted)),
+                          ),
+                          colorScheme: ColorScheme.dark(primary: c.gold, onPrimary: widget.isDark ? const Color(0xFF0F0505) : Colors.white, surface: c.card, onSurface: c.text),
+                        ),
+                        child: child!,
+                      ),
+                    );
+                    if (picked != null) setLocal(() => reminderTime = picked);
+                  },
+                  child: Container(
+                    width: double.infinity, margin: const EdgeInsets.only(top: 8),
+                    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+                    decoration: BoxDecoration(color: c.bg, borderRadius: BorderRadius.circular(10), border: Border.all(color: c.border)),
+                    child: Row(children: [
+                      Icon(Icons.access_time, color: c.gold, size: 18),
+                      const SizedBox(width: 10),
+                      Text('${reminderTime.hour.toString().padLeft(2, '0')}:${reminderTime.minute.toString().padLeft(2, '0')}',
+                          style: TextStyle(color: c.text, fontSize: 14, fontWeight: FontWeight.w600)),
+                    ]),
+                  ),
+                ),
             ]),
           ),
           actions: [
@@ -2656,12 +3340,17 @@ class _PenanceScreenState extends State<PenanceScreen> {
                 if (selected == null || countCtrl.text.isEmpty) return;
                 final count = int.tryParse(countCtrl.text) ?? 0;
                 if (count <= 0) return;
-                setState(() => _items.add(PenanceItem(
+                final newItem = PenanceItem(
                   type: selected!.name, amharic: selected!.amharic,
                   icon: selected!.icon, totalCount: count,
                   completedCount: 0, frequency: frequency,
-                )));
+                  reminderEnabled: reminderOn,
+                  reminderHour: reminderOn ? reminderTime.hour : null,
+                  reminderMinute: reminderOn ? reminderTime.minute : null,
+                );
+                setState(() => _items.add(newItem));
                 _saveData();
+                if (reminderOn) schedulePenanceReminder(newItem);
                 Navigator.pop(ctx);
               },
               child: Container(
@@ -2727,8 +3416,92 @@ class _PenanceScreenState extends State<PenanceScreen> {
   }
 
   void _deleteItem(int index) {
+    cancelPenanceReminder(_items[index].id);
     setState(() => _items.removeAt(index));
     _saveData();
+  }
+
+  void _showReminderDialog(int index) {
+    final c = AppColors(widget.isDark);
+    final item = _items[index];
+    bool enabled = item.reminderEnabled;
+    TimeOfDay time = TimeOfDay(hour: item.reminderHour ?? 6, minute: item.reminderMinute ?? 0);
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          backgroundColor: c.card,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text('Reminder', style: TextStyle(color: c.text, fontWeight: FontWeight.w700, fontSize: 16)),
+          content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('${item.type} — ${item.amharic}', style: TextStyle(color: c.muted, fontSize: 13)),
+            const SizedBox(height: 16),
+            Row(children: [
+              Expanded(child: Text('Daily reminder', style: TextStyle(color: c.text, fontSize: 14, fontWeight: FontWeight.w600))),
+              Switch(value: enabled, onChanged: (v) => setLocal(() => enabled = v), activeThumbColor: c.gold),
+            ]),
+            if (enabled) ...[
+              const SizedBox(height: 10),
+              GestureDetector(
+                onTap: () async {
+                  final picked = await showTimePicker(
+                    context: ctx, initialTime: time, initialEntryMode: TimePickerEntryMode.dial,
+                    builder: (context, child) => Theme(
+                      data: Theme.of(context).copyWith(
+                        timePickerTheme: TimePickerThemeData(
+                          backgroundColor: c.card, hourMinuteColor: c.goldBg, hourMinuteTextColor: c.text,
+                          dayPeriodColor: c.goldBg, dayPeriodTextColor: c.gold, dialBackgroundColor: c.strip,
+                          dialHandColor: c.gold, dialTextColor: c.text, entryModeIconColor: c.gold,
+                          confirmButtonStyle: ButtonStyle(foregroundColor: WidgetStateProperty.all(c.gold)),
+                          cancelButtonStyle: ButtonStyle(foregroundColor: WidgetStateProperty.all(c.muted)),
+                        ),
+                        colorScheme: ColorScheme.dark(primary: c.gold, onPrimary: widget.isDark ? const Color(0xFF0F0505) : Colors.white, surface: c.card, onSurface: c.text),
+                      ),
+                      child: child!,
+                    ),
+                  );
+                  if (picked != null) setLocal(() => time = picked);
+                },
+                child: Container(
+                  width: double.infinity, padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+                  decoration: BoxDecoration(color: c.bg, borderRadius: BorderRadius.circular(10), border: Border.all(color: c.border)),
+                  child: Row(children: [
+                    Icon(Icons.access_time, color: c.gold, size: 18),
+                    const SizedBox(width: 10),
+                    Text('${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}',
+                        style: TextStyle(color: c.text, fontSize: 14, fontWeight: FontWeight.w600)),
+                  ]),
+                ),
+              ),
+            ],
+          ]),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Cancel', style: TextStyle(color: c.muted))),
+            GestureDetector(
+              onTap: () async {
+                setState(() {
+                  item.reminderEnabled = enabled;
+                  item.reminderHour = enabled ? time.hour : null;
+                  item.reminderMinute = enabled ? time.minute : null;
+                });
+                await _saveData();
+                if (enabled) {
+                  await schedulePenanceReminder(item);
+                } else {
+                  await cancelPenanceReminder(item.id);
+                }
+                if (ctx.mounted) Navigator.pop(ctx);
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(color: c.gold, borderRadius: BorderRadius.circular(8)),
+                child: Text('Save', style: TextStyle(color: widget.isDark ? const Color(0xFF0F0505) : Colors.white, fontWeight: FontWeight.w700)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -2810,6 +3583,29 @@ class _PenanceScreenState extends State<PenanceScreen> {
                                       decoration: BoxDecoration(color: c.green.withAlpha(30), borderRadius: BorderRadius.circular(10)),
                                       child: Text('✓ Complete', style: TextStyle(fontSize: 11, color: c.green, fontWeight: FontWeight.w700)),
                                     ),
+                                  const SizedBox(width: 8),
+                                  GestureDetector(
+                                    onTap: () => _showReminderDialog(i),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                                      decoration: BoxDecoration(
+                                        color: item.reminderEnabled ? c.goldBg : c.strip,
+                                        borderRadius: BorderRadius.circular(10),
+                                        border: item.reminderEnabled ? Border.all(color: c.gold, width: 0.5) : null,
+                                      ),
+                                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                                        Icon(item.reminderEnabled ? Icons.notifications_active : Icons.notifications_none,
+                                            color: item.reminderEnabled ? c.gold : c.muted, size: 12),
+                                        if (item.reminderEnabled) ...[
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            '${item.reminderHour!.toString().padLeft(2, '0')}:${item.reminderMinute!.toString().padLeft(2, '0')}',
+                                            style: TextStyle(fontSize: 11, color: c.gold, fontWeight: FontWeight.w600),
+                                          ),
+                                        ],
+                                      ]),
+                                    ),
+                                  ),
                                 ]),
                               ])),
                               GestureDetector(
@@ -7180,6 +7976,12 @@ class _MoreScreenState extends State<MoreScreen> {
     if (!val) await notificationsPlugin.cancelAll();
   }
 
+  Future<void> _saveAngelVisible(bool val) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('angel_visible', val);
+    angelVisibleNotifier.value = val;
+  }
+
   Future<void> _saveFontSize(double val) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble('font_size', val);
@@ -7296,6 +8098,15 @@ class _MoreScreenState extends State<MoreScreen> {
             _actionRow('Achievements', Icons.emoji_events_outlined, c, c.gold, () => Navigator.push(context, MaterialPageRoute(
               builder: (_) => AchievementsScreen(isDark: widget.isDark)))),
             Divider(color: c.border, height: 0.5),
+            _actionRow('Family', Icons.groups_outlined, c, c.gold, () => Navigator.push(context, MaterialPageRoute(
+              builder: (_) => FamilyScreen(isDark: widget.isDark)))),
+            Divider(color: c.border, height: 0.5),
+            _actionRow('ሠናይ (Senay) — Ask a Question', Icons.chat_bubble_outline, c, c.gold, () => Navigator.push(context, MaterialPageRoute(
+              builder: (_) => AiAssistantScreen(isDark: widget.isDark)))),
+            Divider(color: c.border, height: 0.5),
+            _actionRow('Reflection Journal', Icons.menu_book_outlined, c, c.gold, () => Navigator.push(context, MaterialPageRoute(
+              builder: (_) => ReflectionJournalScreen(isDark: widget.isDark)))),
+            Divider(color: c.border, height: 0.5),
             _actionRow('Support Yenefs Abat', Icons.favorite_outline, c, c.gold, () => Navigator.push(context, MaterialPageRoute(
               builder: (_) => SupportUsScreen(isDark: widget.isDark)))),
           ]),
@@ -7317,6 +8128,22 @@ class _MoreScreenState extends State<MoreScreen> {
                   Text('A', style: TextStyle(fontSize: 18, color: c.muted, fontWeight: FontWeight.w700)),
                 ]),
               ]),
+            ),
+            Divider(color: c.border, height: 0.5),
+            ValueListenableBuilder<bool>(
+              valueListenable: angelVisibleNotifier,
+              builder: (context, visible, _) => Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                child: Row(children: [
+                  Icon(Icons.auto_awesome, color: c.gold, size: 20),
+                  const SizedBox(width: 12),
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('ሠናይ (Senay)', style: TextStyle(fontSize: 14, color: c.text, fontWeight: FontWeight.w600)),
+                    Text('Your floating spiritual friend', style: TextStyle(fontSize: 12, color: c.muted)),
+                  ])),
+                  Switch(value: visible, onChanged: _saveAngelVisible, activeThumbColor: c.gold),
+                ]),
+              ),
             ),
           ]),
           _sectionLabel('APP', c),
@@ -7353,6 +8180,9 @@ class _MoreScreenState extends State<MoreScreen> {
             _actionRow('About Us', Icons.info_outline, c, c.gold, _showAbout),
             Divider(color: c.border, height: 0.5),
             _actionRow('License (MIT)', Icons.description_outlined, c, c.gold, _showLicense),
+            Divider(color: c.border, height: 0.5),
+            _actionRow('Website', Icons.language_outlined, c, c.gold, () =>
+              launchUrl(Uri.parse('https://yenefsabat.com'), mode: LaunchMode.externalApplication)),
           ]),
           const SizedBox(height: 24),
           Text('Yenefs_Abat v1.0.0', style: TextStyle(fontSize: 11, color: c.muted, fontStyle: FontStyle.italic)),
@@ -7418,6 +8248,7 @@ class _FastingTrackerScreenState extends State<FastingTrackerScreen> {
   int _longest = 0;
   bool _checkedInToday = false;
   bool _loaded = false;
+  final Set<int> _expandedReasons = {};
 
   @override
   void initState() {
@@ -7588,11 +8419,64 @@ class _FastingTrackerScreenState extends State<FastingTrackerScreen> {
             const SizedBox(height: 10),
             ...fastingPeriodsForYear(now.year).map((p) => _periodRow(p, now, c)),
             const SizedBox(height: 24),
+            Text('WHY WE FAST', style: TextStyle(fontSize: 11, color: c.label, letterSpacing: 2, fontWeight: FontWeight.w700)),
+            Text('የጾም ምክንያት', style: TextStyle(fontSize: 12, color: c.muted, fontStyle: FontStyle.italic)),
+            const SizedBox(height: 10),
+            ...fastExplanations.asMap().entries.map((e) => _reasonCard(e.key, e.value, c)),
+            const SizedBox(height: 24),
           ]),
         )),
       ])),
     );
   }
+
+  Widget _reasonCard(int index, FastExplanation f, AppColors c) {
+    final expanded = _expandedReasons.contains(index);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(color: c.card, borderRadius: BorderRadius.circular(14), border: Border.all(color: expanded ? c.gold : c.border, width: expanded ? 1 : 0.5)),
+      child: Column(children: [
+        GestureDetector(
+          onTap: () => setState(() => expanded ? _expandedReasons.remove(index) : _expandedReasons.add(index)),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(children: [
+              Expanded(child: Text('${f.nameEn} (${f.nameAm})', style: TextStyle(fontSize: 13.5, color: c.text, fontWeight: FontWeight.w600))),
+              AnimatedRotation(turns: expanded ? 0.5 : 0, duration: const Duration(milliseconds: 200),
+                  child: Icon(Icons.keyboard_arrow_down, color: c.gold, size: 20)),
+            ]),
+          ),
+        ),
+        AnimatedCrossFade(
+          duration: const Duration(milliseconds: 220),
+          crossFadeState: expanded ? CrossFadeState.showFirst : CrossFadeState.showSecond,
+          firstChild: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Container(height: 0.5, color: c.border, margin: const EdgeInsets.only(bottom: 12)),
+              _reasonRow('Why', 'ምክንያት', f.reasonEn, f.reasonAm, c),
+              const SizedBox(height: 10),
+              _reasonRow('Duration', 'ጊዜ', f.durationEn, f.durationAm, c),
+              const SizedBox(height: 10),
+              _reasonRow('Practice', 'አጠባበቅ', f.practiceEn, f.practiceAm, c),
+            ]),
+          ),
+          secondChild: const SizedBox(width: double.infinity),
+        ),
+      ]),
+    );
+  }
+
+  Widget _reasonRow(String labelEn, String labelAm, String textEn, String textAm, AppColors c) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text('$labelEn / $labelAm', style: TextStyle(fontSize: 10.5, color: c.gold, letterSpacing: 1, fontWeight: FontWeight.w700)),
+      const SizedBox(height: 4),
+      Text(textEn, style: TextStyle(fontSize: 12.5, color: c.text, height: 1.6)),
+      const SizedBox(height: 3),
+      Text(textAm, style: TextStyle(fontSize: 12.5, color: c.muted, height: 1.6)),
+    ],
+  );
 
   Widget _statTile(String emoji, String value, String label, AppColors c) => Container(
     padding: const EdgeInsets.symmetric(vertical: 18),
@@ -7978,5 +8862,1723 @@ class SupportUsScreen extends StatelessWidget {
       ])),
     );
   }
+}
+
+// ═══════════════════════════════════════════════
+// FAMILY MODE — shared streaks & prayer requests
+// ═══════════════════════════════════════════════
+
+class FamilyScreen extends StatefulWidget {
+  final bool isDark;
+  const FamilyScreen({super.key, required this.isDark});
+  @override
+  State<FamilyScreen> createState() => _FamilyScreenState();
+}
+
+class _FamilyScreenState extends State<FamilyScreen> {
+  bool _loading = true;
+  String? _familyId;
+  final _nameCtrl = TextEditingController();
+  final _codeCtrl = TextEditingController();
+  bool _busy = false;
+
+  @override
+  void initState() { super.initState(); _load(); }
+
+  Future<void> _load() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) { setState(() => _loading = false); return; }
+    try {
+      final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      setState(() { _familyId = doc.data()?['familyId'] as String?; _loading = false; });
+    } catch (_) {
+      setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _createFamily() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    final name = _nameCtrl.text.trim();
+    if (uid == null) { _showError('Please sign in before creating a family.'); return; }
+    if (name.isEmpty) { _showError('Please enter a family name.'); return; }
+    setState(() => _busy = true);
+    try {
+      // Invite codes are looked up by document ID (see inviteCodes/{code}
+      // in firestore.rules) so a collision check is a plain get(), not a
+      // query — queries against a members-only-gated collection are
+      // rejected by Firestore outright, which is exactly what was
+      // surfacing as "no connection" before this fix.
+      String code = generateInviteCode();
+      for (int i = 0; i < 5; i++) {
+        final existing = await FirebaseFirestore.instance.collection('inviteCodes').doc(code).get();
+        if (!existing.exists) break;
+        code = generateInviteCode();
+      }
+      final familyRef = FirebaseFirestore.instance.collection('families').doc();
+      final batch = FirebaseFirestore.instance.batch();
+      batch.set(familyRef, {
+        'name': name,
+        'createdBy': uid,
+        'memberUids': [uid],
+        'inviteCode': code,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+      batch.set(FirebaseFirestore.instance.collection('inviteCodes').doc(code), {
+        'familyId': familyRef.id,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+      await batch.commit();
+      await FirebaseFirestore.instance.collection('users').doc(uid).update({'familyId': familyRef.id});
+      if (mounted) setState(() { _familyId = familyRef.id; _busy = false; });
+    } catch (e) {
+      if (mounted) { setState(() => _busy = false); _showError(_firestoreErrorMessage(e, action: 'create')); }
+    }
+  }
+
+  Future<void> _joinFamily() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    final code = _codeCtrl.text.trim().toUpperCase();
+    if (uid == null) { _showError('Please sign in before joining a family.'); return; }
+    if (code.isEmpty) { _showError('Please enter an invite code.'); return; }
+    setState(() => _busy = true);
+    try {
+      final indexDoc = await FirebaseFirestore.instance.collection('inviteCodes').doc(code).get();
+      final familyId = indexDoc.data()?['familyId'] as String?;
+      if (!indexDoc.exists || familyId == null) {
+        if (mounted) { setState(() => _busy = false); _showError('No family found with that code. Double-check and try again.'); }
+        return;
+      }
+      await FirebaseFirestore.instance.collection('families').doc(familyId).update({'memberUids': FieldValue.arrayUnion([uid])});
+      await FirebaseFirestore.instance.collection('users').doc(uid).update({'familyId': familyId});
+      if (mounted) setState(() { _familyId = familyId; _busy = false; });
+    } catch (e) {
+      if (mounted) { setState(() => _busy = false); _showError(_firestoreErrorMessage(e, action: 'join')); }
+    }
+  }
+
+  /// Maps a Firestore failure to what actually happened instead of a
+  /// generic "connection" message — logs the real FirebaseException code
+  /// so it shows up in `flutter logs`/Logcat for debugging.
+  String _firestoreErrorMessage(Object e, {required String action}) {
+    if (e is FirebaseException) {
+      debugPrint('Family $action failed — FirebaseException code=${e.code} message=${e.message}');
+      switch (e.code) {
+        case 'permission-denied':
+          return "Permission denied. Your Firestore security rules may not be published yet — see firestore.rules and run 'firebase deploy --only firestore:rules'.";
+        case 'unavailable':
+        case 'network-request-failed':
+        case 'deadline-exceeded':
+          return 'You appear to be offline. Please check your connection and try again.';
+        case 'unauthenticated':
+          return 'Please sign in and try again.';
+        default:
+          return 'Could not $action the family (${e.code}). Please try again.';
+      }
+    }
+    debugPrint('Family $action failed — non-Firebase error: $e');
+    return 'Could not $action the family. Please try again.';
+  }
+
+  void _showError(String msg) {
+    final c = AppColors(widget.isDark);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(backgroundColor: c.card, content: Text(msg, style: TextStyle(color: c.text))));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppColors(widget.isDark);
+    return Scaffold(
+      backgroundColor: c.bg,
+      body: SafeArea(child: Column(children: [
+        Container(
+          color: c.hero, padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+          child: Row(children: [
+            GestureDetector(onTap: () => Navigator.pop(context), child: Icon(Icons.arrow_back_ios, color: c.gold, size: 20)),
+            const SizedBox(width: 10),
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('FAMILY', style: TextStyle(fontSize: 16, color: c.text, letterSpacing: 2, fontWeight: FontWeight.w800)),
+              Text('ቤተሰብ', style: TextStyle(fontSize: 13, color: c.muted, fontStyle: FontStyle.italic)),
+            ]),
+          ]),
+        ),
+        Divider(color: c.border, height: 0.5),
+        Expanded(
+          child: _loading
+              ? Center(child: CircularProgressIndicator(color: c.gold))
+              : FirebaseAuth.instance.currentUser == null
+                  ? _signInPrompt(c)
+                  : (_familyId == null
+                      ? _noFamilyView(c)
+                      : _FamilyGroupView(isDark: widget.isDark, familyId: _familyId!, onLeft: () => setState(() => _familyId = null))),
+        ),
+      ])),
+    );
+  }
+
+  Widget _signInPrompt(AppColors c) => Center(child: Padding(
+    padding: const EdgeInsets.all(24),
+    child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+      const Text('👨‍👩‍👧‍👦', style: TextStyle(fontSize: 48)),
+      const SizedBox(height: 16),
+      Text('Sign in to use Family Mode', style: TextStyle(fontSize: 15, color: c.muted, fontWeight: FontWeight.w600), textAlign: TextAlign.center),
+    ]),
+  ));
+
+  Widget _noFamilyView(AppColors c) => SingleChildScrollView(
+    padding: const EdgeInsets.all(20),
+    child: Column(children: [
+      const SizedBox(height: 10),
+      const Text('👨‍👩‍👧‍👦', style: TextStyle(fontSize: 56)),
+      const SizedBox(height: 16),
+      Text('Pray together as a family', style: TextStyle(fontSize: 18, color: c.text, fontWeight: FontWeight.w800), textAlign: TextAlign.center),
+      Text('በቤተሰብ ሆነው ይጸልዩ', style: TextStyle(fontSize: 13, color: c.gold, fontStyle: FontStyle.italic), textAlign: TextAlign.center),
+      const SizedBox(height: 28),
+      Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(color: c.card, borderRadius: BorderRadius.circular(16), border: Border.all(color: c.border, width: 0.5)),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Create a Family', style: TextStyle(fontSize: 14, color: c.text, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _nameCtrl, style: TextStyle(color: c.text),
+            decoration: InputDecoration(
+              hintText: 'Family name', hintStyle: TextStyle(color: c.muted),
+              filled: true, fillColor: c.bg,
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: c.border)),
+              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: c.gold, width: 1.5)),
+            ),
+          ),
+          const SizedBox(height: 12),
+          GestureDetector(
+            onTap: _busy ? null : _createFamily,
+            child: Container(
+              width: double.infinity, padding: const EdgeInsets.symmetric(vertical: 12),
+              decoration: BoxDecoration(color: c.gold.withAlpha(_busy ? 160 : 255), borderRadius: BorderRadius.circular(10)),
+              child: Center(child: _busy
+                  ? SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2.4, color: widget.isDark ? const Color(0xFF0F0505) : Colors.white))
+                  : Text('Create Family', style: TextStyle(color: widget.isDark ? const Color(0xFF0F0505) : Colors.white, fontWeight: FontWeight.w700))),
+            ),
+          ),
+        ]),
+      ),
+      const SizedBox(height: 20),
+      Row(children: [Expanded(child: Divider(color: c.border)), Padding(padding: const EdgeInsets.symmetric(horizontal: 10), child: Text('OR', style: TextStyle(color: c.muted, fontSize: 12))), Expanded(child: Divider(color: c.border))]),
+      const SizedBox(height: 20),
+      Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(color: c.card, borderRadius: BorderRadius.circular(16), border: Border.all(color: c.border, width: 0.5)),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Join a Family', style: TextStyle(fontSize: 14, color: c.text, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _codeCtrl, style: TextStyle(color: c.text, letterSpacing: 3), textCapitalization: TextCapitalization.characters,
+            decoration: InputDecoration(
+              hintText: 'Invite code', hintStyle: TextStyle(color: c.muted),
+              filled: true, fillColor: c.bg,
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: c.border)),
+              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: c.gold, width: 1.5)),
+            ),
+          ),
+          const SizedBox(height: 12),
+          GestureDetector(
+            onTap: _busy ? null : _joinFamily,
+            child: Container(
+              width: double.infinity, padding: const EdgeInsets.symmetric(vertical: 12),
+              decoration: BoxDecoration(color: c.goldBg, borderRadius: BorderRadius.circular(10), border: Border.all(color: c.gold, width: 0.5)),
+              child: Center(child: Text('Join Family', style: TextStyle(color: c.gold, fontWeight: FontWeight.w700))),
+            ),
+          ),
+        ]),
+      ),
+    ]),
+  );
+}
+
+class _FamilyGroupView extends StatefulWidget {
+  final bool isDark;
+  final String familyId;
+  final VoidCallback onLeft;
+  const _FamilyGroupView({required this.isDark, required this.familyId, required this.onLeft});
+  @override
+  State<_FamilyGroupView> createState() => _FamilyGroupViewState();
+}
+
+class _FamilyGroupViewState extends State<_FamilyGroupView> {
+  FamilyGroup? _group;
+  List<FamilyMember> _members = [];
+  bool _loadingMembers = true;
+  final _requestCtrl = TextEditingController();
+
+  @override
+  void initState() { super.initState(); _loadGroup(); }
+
+  String get _todayKey {
+    final d = DateTime.now();
+    return '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+  }
+
+  Future<void> _loadGroup() async {
+    final doc = await FirebaseFirestore.instance.collection('families').doc(widget.familyId).get();
+    if (!doc.exists) return;
+    final group = FamilyGroup.fromDoc(doc);
+    final userDocs = await Future.wait(group.memberUids.map((uid) => FirebaseFirestore.instance.collection('users').doc(uid).get()));
+    final members = <FamilyMember>[];
+    for (final ud in userDocs) {
+      final j = ud.data();
+      if (j == null) continue;
+      final name = (j['name'] as String?);
+      members.add(FamilyMember(
+        uid: ud.id,
+        name: (name != null && name.trim().isNotEmpty) ? name : 'Member',
+        streak: (j['currentStreak'] as int?) ?? 0,
+        prayedToday: j['lastCheckInDate'] == _todayKey,
+      ));
+    }
+    if (mounted) setState(() { _group = group; _members = members; _loadingMembers = false; });
+  }
+
+  Future<void> _leaveFamily() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null || _group == null) return;
+    await FirebaseFirestore.instance.collection('families').doc(_group!.id).update({'memberUids': FieldValue.arrayRemove([uid])});
+    await FirebaseFirestore.instance.collection('users').doc(uid).update({'familyId': null});
+    widget.onLeft();
+  }
+
+  Future<void> _postRequest() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    final text = _requestCtrl.text.trim();
+    if (uid == null || text.isEmpty || _group == null) return;
+    final me = _members.firstWhere((m) => m.uid == uid, orElse: () => FamilyMember(uid: uid, name: 'Member', streak: 0, prayedToday: false));
+    await FirebaseFirestore.instance.collection('families').doc(_group!.id).collection('prayerRequests').add({
+      'authorUid': uid, 'authorName': me.name, 'text': text,
+      'createdAt': FieldValue.serverTimestamp(), 'prayedByUids': <String>[],
+    });
+    _requestCtrl.clear();
+    if (mounted) Navigator.pop(context);
+  }
+
+  Future<void> _prayFor(PrayerRequest r) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null || _group == null || r.prayedByUids.contains(uid)) return;
+    await FirebaseFirestore.instance.collection('families').doc(_group!.id).collection('prayerRequests').doc(r.id)
+        .update({'prayedByUids': FieldValue.arrayUnion([uid])});
+  }
+
+  void _showNewRequestSheet() {
+    final c = AppColors(widget.isDark);
+    showModalBottomSheet(
+      context: context, backgroundColor: Colors.transparent, isScrollControlled: true,
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+        child: Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(color: c.card, borderRadius: const BorderRadius.vertical(top: Radius.circular(22))),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Center(child: Container(width: 38, height: 4, margin: const EdgeInsets.only(bottom: 16), decoration: BoxDecoration(color: c.border, borderRadius: BorderRadius.circular(2)))),
+            Text('New Prayer Request', style: TextStyle(color: c.text, fontWeight: FontWeight.w700, fontSize: 15)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _requestCtrl, maxLines: 3, style: TextStyle(color: c.text),
+              decoration: InputDecoration(
+                hintText: 'What would you like your family to pray for?', hintStyle: TextStyle(color: c.muted),
+                filled: true, fillColor: c.bg,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: c.border)),
+                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: c.gold, width: 1.5)),
+              ),
+            ),
+            const SizedBox(height: 14),
+            GestureDetector(
+              onTap: _postRequest,
+              child: Container(
+                width: double.infinity, padding: const EdgeInsets.symmetric(vertical: 12),
+                decoration: BoxDecoration(color: c.gold, borderRadius: BorderRadius.circular(10)),
+                child: Center(child: Text('Share with Family', style: TextStyle(color: widget.isDark ? const Color(0xFF0F0505) : Colors.white, fontWeight: FontWeight.w700))),
+              ),
+            ),
+            const SizedBox(height: 10),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppColors(widget.isDark);
+    if (_group == null) return Center(child: CircularProgressIndicator(color: c.gold));
+    final feast = nextMajorFeast();
+    return RefreshIndicator(
+      color: c.gold,
+      onRefresh: _loadGroup,
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(gradient: const LinearGradient(colors: [Color(0xFFE3C878), Color(0xFFC9A84C), Color(0xFFA98937)]), borderRadius: BorderRadius.circular(16)),
+            child: Row(children: [
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(_group!.name, style: TextStyle(color: widget.isDark ? const Color(0xFF0F0505) : Colors.white, fontWeight: FontWeight.w800, fontSize: 16)),
+                const SizedBox(height: 4),
+                Text('Invite code: ${_group!.inviteCode}',
+                    style: TextStyle(color: (widget.isDark ? const Color(0xFF0F0505) : Colors.white).withAlpha(220), fontSize: 13, letterSpacing: 1.5, fontWeight: FontWeight.w600)),
+              ])),
+              GestureDetector(
+                onTap: () => Share.share('Join our family on Yenefs Abat! Use invite code: ${_group!.inviteCode}'),
+                child: Icon(Icons.share, color: widget.isDark ? const Color(0xFF0F0505) : Colors.white),
+              ),
+            ]),
+          ),
+          const SizedBox(height: 14),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(color: c.goldBg, borderRadius: BorderRadius.circular(14), border: Border.all(color: c.gold, width: 0.5)),
+            child: Row(children: [
+              const Text('🕊️', style: TextStyle(fontSize: 24)),
+              const SizedBox(width: 12),
+              Expanded(child: Text(
+                feast.daysRemaining == 0 ? '${feast.nameEn} is today! ${feast.nameAm}' : '${feast.daysRemaining} days until ${feast.nameEn} — ${feast.nameAm}',
+                style: TextStyle(color: c.text, fontSize: 13, fontWeight: FontWeight.w600),
+              )),
+            ]),
+          ),
+          const SizedBox(height: 14),
+          Text('MEMBERS', style: TextStyle(fontSize: 12, color: c.muted, letterSpacing: 2, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 10),
+          if (_loadingMembers)
+            Center(child: CircularProgressIndicator(color: c.gold))
+          else
+            ..._members.map((m) => Container(
+                  margin: const EdgeInsets.only(bottom: 10),
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(color: c.card, borderRadius: BorderRadius.circular(14), border: Border.all(color: c.border, width: 0.5)),
+                  child: Row(children: [
+                    CircleAvatar(radius: 18, backgroundColor: c.goldBg, child: Text(m.name.isNotEmpty ? m.name[0].toUpperCase() : '?', style: TextStyle(color: c.gold, fontWeight: FontWeight.w700))),
+                    const SizedBox(width: 12),
+                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(m.name, style: TextStyle(color: c.text, fontWeight: FontWeight.w700, fontSize: 14)),
+                      Text('🔥 ${m.streak} day streak', style: TextStyle(color: c.muted, fontSize: 12)),
+                    ])),
+                    if (m.prayedToday)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(color: c.green.withAlpha(30), borderRadius: BorderRadius.circular(10)),
+                        child: Text('✓ Prayed Today', style: TextStyle(color: c.green, fontSize: 11, fontWeight: FontWeight.w700)),
+                      ),
+                  ]),
+                )),
+          const SizedBox(height: 8),
+          Row(children: [
+            Text('PRAYER REQUESTS', style: TextStyle(fontSize: 12, color: c.muted, letterSpacing: 2, fontWeight: FontWeight.w700)),
+            const Spacer(),
+            GestureDetector(
+              onTap: _showNewRequestSheet,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(color: c.goldBg, borderRadius: BorderRadius.circular(20), border: Border.all(color: c.gold, width: 0.5)),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.add, color: c.gold, size: 14),
+                  const SizedBox(width: 4),
+                  Text('New', style: TextStyle(color: c.gold, fontSize: 11, fontWeight: FontWeight.w700)),
+                ]),
+              ),
+            ),
+          ]),
+          const SizedBox(height: 10),
+          StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+            stream: FirebaseFirestore.instance.collection('families').doc(_group!.id).collection('prayerRequests').orderBy('createdAt', descending: true).snapshots(),
+            builder: (context, snap) {
+              if (!snap.hasData) return Center(child: CircularProgressIndicator(color: c.gold));
+              final requests = snap.data!.docs.map((d) => PrayerRequest.fromDoc(d)).toList();
+              if (requests.isEmpty) {
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 20),
+                  child: Center(child: Column(children: [
+                    const Text('🙏', style: TextStyle(fontSize: 36)),
+                    const SizedBox(height: 10),
+                    Text('No prayer requests yet', style: TextStyle(color: c.muted, fontSize: 13, fontStyle: FontStyle.italic)),
+                  ])),
+                );
+              }
+              final weekAgo = DateTime.now().subtract(const Duration(days: 7));
+              final weeklyTotal = requests.where((r) => r.createdAt != null && r.createdAt!.isAfter(weekAgo)).fold<int>(0, (acc, r) => acc + r.prayedCount);
+              final uid = FirebaseAuth.instance.currentUser?.uid;
+              return Column(children: [
+                if (weeklyTotal > 0)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    padding: const EdgeInsets.all(12),
+                    width: double.infinity,
+                    decoration: BoxDecoration(color: c.goldBg, borderRadius: BorderRadius.circular(12)),
+                    child: Text('Your family prayed $weeklyTotal times this week 🕊️', textAlign: TextAlign.center, style: TextStyle(color: c.text, fontSize: 12.5, fontWeight: FontWeight.w600)),
+                  ),
+                ...requests.map((r) {
+                  final prayed = uid != null && r.prayedByUids.contains(uid);
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(color: c.card, borderRadius: BorderRadius.circular(14), border: Border.all(color: c.border, width: 0.5)),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(r.text, style: TextStyle(color: c.text, fontSize: 13.5, height: 1.5)),
+                      const SizedBox(height: 8),
+                      Row(children: [
+                        Text('— ${r.authorName}', style: TextStyle(color: c.muted, fontSize: 11, fontStyle: FontStyle.italic)),
+                        const Spacer(),
+                        GestureDetector(
+                          onTap: prayed ? null : () => _prayFor(r),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                            decoration: BoxDecoration(
+                              color: prayed ? c.green.withAlpha(30) : c.goldBg,
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(color: prayed ? c.green : c.gold, width: 0.5),
+                            ),
+                            child: Text('🙏 ${prayed ? "Prayed" : "I prayed for this"} (${r.prayedCount})', style: TextStyle(color: prayed ? c.green : c.gold, fontSize: 11, fontWeight: FontWeight.w700)),
+                          ),
+                        ),
+                      ]),
+                    ]),
+                  );
+                }),
+              ]);
+            },
+          ),
+          const SizedBox(height: 20),
+          Center(child: TextButton(onPressed: _leaveFamily, child: Text('Leave Family', style: TextStyle(color: c.red, fontSize: 13)))),
+        ],
+      ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════
+// FOCUS MODE — respectful in-app prayer/penance focus session
+//
+// This screen deliberately does NOT and CANNOT lock the device or block
+// other apps — Flutter has no such capability without invasive
+// device-administrator permissions that Google Play scrutinizes heavily
+// and that this app does not request. It's an immersive, distraction-free
+// screen the user can always leave via the "hold to exit" control.
+// ═══════════════════════════════════════════════
+
+class FocusSetupScreen extends StatefulWidget {
+  final bool isDark;
+  const FocusSetupScreen({super.key, required this.isDark});
+  @override
+  State<FocusSetupScreen> createState() => _FocusSetupScreenState();
+}
+
+class _FocusSetupScreenState extends State<FocusSetupScreen> {
+  int _minutes = 10;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppColors(widget.isDark);
+    return Scaffold(
+      backgroundColor: c.bg,
+      body: SafeArea(child: Column(children: [
+        Container(
+          color: c.hero, padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+          child: Row(children: [
+            GestureDetector(onTap: () => Navigator.pop(context), child: Icon(Icons.arrow_back_ios, color: c.gold, size: 20)),
+            const SizedBox(width: 10),
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('FOCUS MODE', style: TextStyle(fontSize: 16, color: c.text, letterSpacing: 2, fontWeight: FontWeight.w800)),
+              Text('የማተኮሪያ ጊዜ', style: TextStyle(fontSize: 13, color: c.muted, fontStyle: FontStyle.italic)),
+            ]),
+          ]),
+        ),
+        Divider(color: c.border, height: 0.5),
+        Expanded(child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Column(children: [
+            const SizedBox(height: 10),
+            const Text('🕯️', style: TextStyle(fontSize: 56)),
+            const SizedBox(height: 18),
+            Text('Set aside quiet time for prayer', style: TextStyle(fontSize: 18, color: c.text, fontWeight: FontWeight.w800), textAlign: TextAlign.center),
+            Text('ለጸሎት ጸጥ ያለ ጊዜ ይመድቡ', style: TextStyle(fontSize: 13, color: c.gold, fontStyle: FontStyle.italic), textAlign: TextAlign.center),
+            const SizedBox(height: 24),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(color: c.goldBg, borderRadius: BorderRadius.circular(14), border: Border.all(color: c.gold, width: 0.5)),
+              child: Text(
+                'This is a gentle, respectful screen to help you set the phone aside during prayer — it cannot lock your device or block other apps. Hold the exit button at any time to leave.\n\nይህ ስልክዎን ወደ ጎን ለማድረግ የሚረዳ ገር ገጽ ነው። መሣሪያዎን ሊቆልፍ ወይም ሌሎች መተግበሪያዎችን ሊያግድ አይችልም። ለመውጣት በማንኛውም ጊዜ የመውጫ ቁልፉን ተጭነው ይያዙ።',
+                style: TextStyle(color: c.text, fontSize: 12.5, height: 1.7), textAlign: TextAlign.center,
+              ),
+            ),
+            const SizedBox(height: 28),
+            Text('Choose a duration', style: TextStyle(color: c.muted, fontSize: 12, fontWeight: FontWeight.w600, letterSpacing: 1.5)),
+            const SizedBox(height: 14),
+            Wrap(spacing: 12, runSpacing: 12, alignment: WrapAlignment.center, children: [5, 10, 15, 30].map((m) =>
+              GestureDetector(
+                onTap: () => setState(() => _minutes = m),
+                child: Container(
+                  width: 72, height: 72,
+                  decoration: BoxDecoration(
+                    gradient: _minutes == m ? const LinearGradient(colors: [Color(0xFFE3C878), Color(0xFFC9A84C), Color(0xFFA98937)]) : null,
+                    color: _minutes == m ? null : c.card,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: c.gold, width: _minutes == m ? 0 : 0.5),
+                  ),
+                  child: Center(child: Text('$m\nmin', textAlign: TextAlign.center,
+                    style: TextStyle(color: _minutes == m ? (widget.isDark ? const Color(0xFF0F0505) : Colors.white) : c.text, fontWeight: FontWeight.w700, fontSize: 13, height: 1.2))),
+                ),
+              ),
+            ).toList()),
+            const SizedBox(height: 32),
+            GestureDetector(
+              onTap: () => Navigator.push(context, MaterialPageRoute(
+                fullscreenDialog: true,
+                builder: (_) => FocusModeScreen(isDark: widget.isDark, duration: Duration(minutes: _minutes)),
+              )),
+              child: Container(
+                width: double.infinity, padding: const EdgeInsets.symmetric(vertical: 16),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(colors: [Color(0xFFE3C878), Color(0xFFC9A84C), Color(0xFFA98937)]),
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [BoxShadow(color: c.gold.withAlpha(110), blurRadius: 16, offset: const Offset(0, 6))],
+                ),
+                child: Center(child: Text('BEGIN FOCUS SESSION',
+                  style: TextStyle(fontSize: 14, letterSpacing: 1.5, fontWeight: FontWeight.w800, color: widget.isDark ? const Color(0xFF0F0505) : Colors.white))),
+              ),
+            ),
+          ]),
+        )),
+      ])),
+    );
+  }
+}
+
+class FocusModeScreen extends StatefulWidget {
+  final bool isDark;
+  final Duration duration;
+  const FocusModeScreen({super.key, required this.isDark, required this.duration});
+  @override
+  State<FocusModeScreen> createState() => _FocusModeScreenState();
+}
+
+class _FocusModeScreenState extends State<FocusModeScreen> with SingleTickerProviderStateMixin {
+  late Duration _remaining;
+  Timer? _timer;
+  bool _finished = false;
+  bool _exiting = false;
+  late AnimationController _pulseController;
+
+  @override
+  void initState() {
+    super.initState();
+    _remaining = widget.duration;
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    WakelockPlus.enable();
+    _pulseController = AnimationController(vsync: this, duration: const Duration(seconds: 2))..repeat(reverse: true);
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
+  }
+
+  void _tick() {
+    if (!mounted) return;
+    if (_remaining.inSeconds <= 1) {
+      _timer?.cancel();
+      setState(() { _remaining = Duration.zero; _finished = true; });
+      _complete();
+    } else {
+      setState(() => _remaining -= const Duration(seconds: 1));
+    }
+  }
+
+  Future<void> _complete() async {
+    final prefs = await SharedPreferences.getInstance();
+    final count = (prefs.getInt('focus_sessions_completed') ?? 0) + 1;
+    await prefs.setInt('focus_sessions_completed', count);
+    if (!mounted) return;
+    await maybeUnlockAchievement(context, 'focus_1', widget.isDark);
+    if (count >= 10 && mounted) await maybeUnlockAchievement(context, 'focus_10', widget.isDark);
+  }
+
+  Future<void> _restoreSystemUi() async {
+    await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    await WakelockPlus.disable();
+  }
+
+  // Completed sessions exit straight away. Leaving early — back button,
+  // exit gesture, or the Exit button — opens the Reflection Gate first;
+  // only once that concludes (finished or urgent-exited) do we actually
+  // pop out of the focus session.
+  Future<void> _attemptExit() async {
+    if (_finished) { await _exit(); return; }
+    if (_exiting) return;
+    _exiting = true;
+    final proceeded = await Navigator.push<bool>(context, MaterialPageRoute(
+      fullscreenDialog: true,
+      builder: (_) => ReflectionGateScreen(isDark: widget.isDark, sessionDuration: widget.duration, remaining: _remaining),
+    ));
+    _exiting = false;
+    if (proceeded == true) await _exit();
+  }
+
+  Future<void> _exit() async {
+    await _restoreSystemUi();
+    if (mounted) Navigator.of(context).pop();
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _pulseController.dispose();
+    _restoreSystemUi();
+    super.dispose();
+  }
+
+  String get _timeText {
+    final m = _remaining.inMinutes.toString().padLeft(2, '0');
+    final s = (_remaining.inSeconds % 60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) { if (!didPop) _attemptExit(); },
+      child: Scaffold(
+        backgroundColor: const Color(0xFF07060F),
+        body: SafeArea(
+          child: Center(
+            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              AnimatedBuilder(
+                animation: _pulseController,
+                builder: (context, child) => Opacity(
+                  opacity: 0.55 + 0.45 * _pulseController.value,
+                  child: Transform.scale(scale: 0.94 + 0.08 * _pulseController.value, child: child),
+                ),
+                child: Text(_finished ? '✝️' : '🕯️', style: const TextStyle(fontSize: 90)),
+              ),
+              const SizedBox(height: 32),
+              ShaderMask(
+                shaderCallback: (bounds) => const LinearGradient(colors: [Color(0xFFE3C878), Color(0xFFC9A84C), Color(0xFFA98937)]).createShader(bounds),
+                child: Text(_finished ? 'Amen' : _timeText,
+                    style: const TextStyle(fontSize: 56, fontWeight: FontWeight.w800, color: Colors.white, letterSpacing: 2)),
+              ),
+              const SizedBox(height: 20),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 40),
+                child: Text(
+                  _finished
+                      ? 'Your focus session is complete. May God accept your prayer.\n\nየማተኮሪያ ጊዜዎ ተጠናቋል። እግዚአብሔር ጸሎትዎን ይቀበል።'
+                      : 'Set your phone aside. Pray, or perform your penance, without distraction.\n\nስልክዎን ወደ ጎን ያድርጉ። ያለ ምንም መዘናጋት ይጸልዩ ወይም ንስሐዎን ይፈጽሙ።',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Color(0xFFC9BFA8), fontSize: 13.5, height: 1.8),
+                ),
+              ),
+              const SizedBox(height: 48),
+              if (_finished)
+                GestureDetector(
+                  onTap: _exit,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
+                    decoration: BoxDecoration(gradient: const LinearGradient(colors: [Color(0xFFE3C878), Color(0xFFC9A84C), Color(0xFFA98937)]), borderRadius: BorderRadius.circular(30)),
+                    child: const Text('Done', style: TextStyle(color: Color(0xFF0F0505), fontWeight: FontWeight.w800, fontSize: 15)),
+                  ),
+                )
+              else
+                GestureDetector(
+                  onTap: _attemptExit,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 10),
+                    decoration: BoxDecoration(borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.white24, width: 1)),
+                    child: const Text('Exit', style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w600)),
+                  ),
+                ),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════
+// REFLECTION GATE — a gentle pause before leaving a focus session early
+//
+// Never a punishment: 3 short faith-teaching questions (random from a pool
+// of 20, with the answer explained either way), then 2 private
+// self-screening prompts saved only to the user's own journal. An "urgent
+// exit" is always available — this creates a mindful pause, not a trap.
+// ═══════════════════════════════════════════════
+
+class FocusReflectionQuestion {
+  final String questionEn, questionAm;
+  final List<String> optionsEn, optionsAm;
+  final int correctIndex;
+  final String explanationEn, explanationAm;
+  const FocusReflectionQuestion({
+    required this.questionEn, required this.questionAm,
+    required this.optionsEn, required this.optionsAm,
+    required this.correctIndex, required this.explanationEn, required this.explanationAm,
+  });
+}
+
+const List<FocusReflectionQuestion> focusReflectionQuestionPool = [
+  FocusReflectionQuestion(
+    questionEn: "Who did Christ tell to \"feed my sheep\"?", questionAm: '"በጎቼን ጠብቅ" የተባለው ማን ነው?',
+    optionsEn: ['Peter', 'John', 'James', 'Paul'], optionsAm: ['ጴጥሮስ', 'ዮሐንስ', 'ያዕቆብ', 'ጳውሎስ'],
+    correctIndex: 0,
+    explanationEn: 'After the Resurrection, Christ asked Peter three times if he loved Him, and each time charged him: "Feed my sheep" (John 21:15-17).',
+    explanationAm: 'ከትንሣኤ በኋላ ጌታ ጴጥሮስን ሦስት ጊዜ ይወደው እንደ ሆነ ጠየቀው፣ በእያንዳንዱም ጊዜ "በጎቼን ጠብቅ" አለው (ዮሐንስ ፳፩፥፲፭-፲፯)።',
+  ),
+  FocusReflectionQuestion(
+    questionEn: 'Which fast commemorates the Assumption of the Virgin Mary?', questionAm: 'የእመቤታችንን ፍልሰት የሚዘክረው ጾም የትኛው ነው?',
+    optionsEn: ["Nineveh's Fast", 'Fast of the Assumption (Filseta)', 'Great Lent', 'Advent'], optionsAm: ['ጾመ ነነዌ', 'ጾመ ፍልሰታ', 'ዐቢይ ጾም', 'ጾመ ነቢያት'],
+    correctIndex: 1,
+    explanationEn: 'ጾመ ፍልሰታ (Filseta), from Nehase 1-15, commemorates the falling asleep and assumption of the Virgin Mary.',
+    explanationAm: 'ጾመ ፍልሰታ ከነሐሴ ፩ እስከ ፲፭ የሚፈጸም ሲሆን የእመቤታችንን ማረፍና ፍልሰት ይዘክራል።',
+  ),
+  FocusReflectionQuestion(
+    questionEn: 'What does ንስሐ (nesiha) mean?', questionAm: 'ንስሐ ማለት ምን ማለት ነው?',
+    optionsEn: ['Fasting', 'Repentance', 'Prayer', 'Almsgiving'], optionsAm: ['ጾም', 'ንስሐ (ኃጢአትን መተው)', 'ጸሎት', 'ምጽዋት'],
+    correctIndex: 1,
+    explanationEn: 'ንስሐ means repentance — turning away from sin and back to God, prepared for through confession with a spiritual father.',
+    explanationAm: 'ንስሐ ማለት ከኃጢአት ተመልሶ ወደ እግዚአብሔር መመለስ ማለት ነው፤ ይህም ከነፍስ አባት ጋር በንስሐ አማካኝነት ይዘጋጃል።',
+  ),
+  FocusReflectionQuestion(
+    questionEn: 'How many days is Great Lent (ዐቢይ ጾም), including Holy Week?', questionAm: 'ዐቢይ ጾም ከሰሙነ ሕማማት ጋር ስንት ቀናት ነው?',
+    optionsEn: ['40', '55', '15', '30'], optionsAm: ['፵', '፶፭', '፲፭', '፴'],
+    correctIndex: 1,
+    explanationEn: 'The EOTC counts Great Lent as 55 days: 40 days of Lent plus Holy Week, in remembrance of Christ\'s 40-day fast.',
+    explanationAm: 'ዐቢይ ጾም ፶፭ ቀናት ሲሆን ፵ ቀናት ዐቢይ ጾም እና ሰሙነ ሕማማትን ያካትታል፤ ይህም የጌታን የ፵ ቀን ጾም ለማሰብ ነው።',
+  ),
+  FocusReflectionQuestion(
+    questionEn: 'What does መስቀል (Meskel) commemorate?', questionAm: 'መስቀል የሚዘክረው ምንድን ነው?',
+    optionsEn: ['The Baptism of Christ', 'The Finding of the True Cross', 'The Nativity', 'The Ascension'], optionsAm: ['የጌታን ጥምቀት', 'የመስቀሉን መገኘት', 'ልደተ ክርስቶስን', 'ዕርገትን'],
+    correctIndex: 1,
+    explanationEn: 'መስቀል celebrates the finding of the True Cross by Empress Helena in the 4th century.',
+    explanationAm: 'መስቀል በ፬ኛው ክፍለ ዘመን ንግሥት ዕሌኒ የክርስቶስን መስቀል ያገኙበትን መታሰቢያ ያከብራል።',
+  ),
+  FocusReflectionQuestion(
+    questionEn: 'What does ጥምቀት (Timkat) celebrate?', questionAm: 'ጥምቀት የሚያከብረው ምንድን ነው?',
+    optionsEn: ['The Baptism of Christ', 'Easter', 'Pentecost', 'Palm Sunday'], optionsAm: ['የጌታን ጥምቀት', 'ትንሣኤን', 'ጰራቅሊጦስን', 'ሆሣዕናን'],
+    correctIndex: 0,
+    explanationEn: 'ጥምቀት (Epiphany) celebrates Christ\'s baptism in the Jordan River by John the Baptist.',
+    explanationAm: 'ጥምቀት ጌታችን በዮርዳኖስ ወንዝ በመጥምቁ ዮሐንስ እጅ የተጠመቀበትን ያከብራል።',
+  ),
+  FocusReflectionQuestion(
+    questionEn: 'On which two weekdays do EOTC faithful traditionally fast?', questionAm: 'የኦርቶዶክስ ተዋሕዶ ምዕመናን በሳምንት በየትኞቹ ሁለት ቀናት ይጾማሉ?',
+    optionsEn: ['Monday & Thursday', 'Wednesday & Friday', 'Tuesday & Saturday', 'Sunday & Friday'], optionsAm: ['ሰኞና ሐሙስ', 'ረቡዕና ዓርብ', 'ማክሰኞና ቅዳሜ', 'እሑድና ዓርብ'],
+    correctIndex: 1,
+    explanationEn: 'Wednesday recalls the betrayal of Christ; Friday recalls His crucifixion.',
+    explanationAm: 'ረቡዕ ጌታ የተከዳበት ቀን ሲሆን ዓርብ ደግሞ የተሰቀለበት ቀን ነው።',
+  ),
+  FocusReflectionQuestion(
+    questionEn: 'What is Enkutatash (እንቁጣጣሽ)?', questionAm: 'እንቁጣጣሽ ምንድን ነው?',
+    optionsEn: ['The Ethiopian New Year', 'A fasting period', 'A saint\'s feast', 'The Epiphany'], optionsAm: ['የኢትዮጵያ አዲስ ዓመት', 'የጾም ወቅት', 'የቅዱስ በዓል', 'ጥምቀት'],
+    correctIndex: 0,
+    explanationEn: 'እንቁጣጣሽ, on Meskerem 1, marks the Ethiopian New Year.',
+    explanationAm: 'እንቁጣጣሽ በመስከረም ፩ የሚከበር የኢትዮጵያ አዲስ ዓመት ነው።',
+  ),
+  FocusReflectionQuestion(
+    questionEn: 'What is ፋሲካ (Fasika)?', questionAm: 'ፋሲካ ምንድን ነው?',
+    optionsEn: ['Christmas', 'Easter (Pascha)', 'Pentecost', 'Epiphany'], optionsAm: ['ገና', 'ትንሣኤ', 'ጰራቅሊጦስ', 'ጥምቀት'],
+    correctIndex: 1,
+    explanationEn: 'ፋሲካ is the Feast of the Resurrection — the greatest feast of the Church year.',
+    explanationAm: 'ፋሲካ የትንሣኤ በዓል ሲሆን ከዓመታዊ በዓላት ሁሉ የላቀው ነው።',
+  ),
+  FocusReflectionQuestion(
+    questionEn: 'Who baptized Jesus Christ?', questionAm: 'ጌታ ኢየሱስ ክርስቶስን ያጠመቀው ማን ነው?',
+    optionsEn: ['Peter', 'John the Baptist', 'Paul', 'Andrew'], optionsAm: ['ጴጥሮስ', 'መጥምቁ ዮሐንስ', 'ጳውሎስ', 'እንድርያስ'],
+    correctIndex: 1,
+    explanationEn: 'John the Baptist baptized Christ in the Jordan River, an event celebrated at Timkat.',
+    explanationAm: 'መጥምቁ ዮሐንስ ጌታን በዮርዳኖስ ወንዝ አጠመቀው፤ ይህም በጥምቀት በዓል ይታሰባል።',
+  ),
+  FocusReflectionQuestion(
+    questionEn: 'What does ቅዳሴ (Kidase) refer to?', questionAm: 'ቅዳሴ ምን ማለት ነው?',
+    optionsEn: ['The Divine Liturgy', 'A fasting period', 'A saint\'s biography', 'A church building'], optionsAm: ['ቅዳሴ (ቅዱስ ቁርባን)', 'የጾም ወቅት', 'የቅዱሳን ገድል', 'ቤተ ክርስቲያን'],
+    correctIndex: 0,
+    explanationEn: 'ቅዳሴ is the Divine Liturgy, the central service of Holy Communion.',
+    explanationAm: 'ቅዳሴ የቅዱስ ቁርባን ማዕከላዊ ሥርዓተ አምልኮ ነው።',
+  ),
+  FocusReflectionQuestion(
+    questionEn: 'What does the ስንክሳር (Synaxarium) contain?', questionAm: 'ስንክሳር ምን ይይዛል?',
+    optionsEn: ['Church laws', 'Daily lives of saints', 'Hymns', 'Fasting rules'], optionsAm: ['የቤተ ክርስቲያን ሕግጋት', 'የቅዱሳን ገድላት በየዕለቱ', 'መዝሙራት', 'የጾም ሥርዓት'],
+    correctIndex: 1,
+    explanationEn: 'The Synaxarium gives a short life or commemoration of a saint for every day of the year.',
+    explanationAm: 'ስንክሳር ለዓመቱ ለእያንዳንዱ ቀን የቅዱሳንን ገድል በአጭሩ ያቀርባል።',
+  ),
+  FocusReflectionQuestion(
+    questionEn: 'What is ውዳሴ ማርያም (Wudase Mariam)?', questionAm: 'ውዳሴ ማርያም ምንድን ነው?',
+    optionsEn: ['A hymn of praise to the Virgin Mary', 'A fasting period', 'A feast day', 'A confession prayer'], optionsAm: ['ለእመቤታችን የምስጋና ጸሎት', 'የጾም ወቅት', 'የበዓል ቀን', 'የንስሐ ጸሎት'],
+    correctIndex: 0,
+    explanationEn: 'ውዳሴ ማርያም is a daily hymn of praise to the Theotokos, one for each day of the week.',
+    explanationAm: 'ውዳሴ ማርያም ለእመቤታችን በየቀኑ የሚደገም የምስጋና ጸሎት ነው፤ ለሳምንቱ ለእያንዳንዱ ቀን የተለየ አለው።',
+  ),
+  FocusReflectionQuestion(
+    questionEn: 'How many major fasting periods does the EOTC observe in a year?', questionAm: 'የኦርቶዶክስ ተዋሕዶ ቤተ ክርስቲያን በዓመት ስንት ዋና ዋና አጽዋማት ትይዛለች?',
+    optionsEn: ['2', '4', '7', '10'], optionsAm: ['፪', '፬', '፯', '፲'],
+    correctIndex: 2,
+    explanationEn: 'The EOTC observes seven major fasts, including Great Lent, the Apostles\' Fast, and Filseta.',
+    explanationAm: 'ቤተ ክርስቲያኒቱ ሰባት ዋና ዋና አጽዋማትን ትይዛለች፣ ከእነዚህም ዐቢይ ጾም፣ ጾመ ሐዋርያት እና ጾመ ፍልሰታ ይገኙበታል።',
+  ),
+  FocusReflectionQuestion(
+    questionEn: 'What does "Abba" mean when addressing a priest?', questionAm: 'ካህንን ሲጠሩ "አባ" ማለት ምን ማለት ነው?',
+    optionsEn: ['Brother', 'Father', 'Teacher', 'Elder'], optionsAm: ['ወንድም', 'አባት', 'መምህር', 'ሽማግሌ'],
+    correctIndex: 1,
+    explanationEn: '"Abba" (አባ) means "Father" — a title of spiritual fatherhood, not just seniority.',
+    explanationAm: '"አባ" ማለት "አባት" ማለት ነው — የመንፈሳዊ አባትነት ማዕረግ እንጂ የዕድሜ ብቻ አይደለም።',
+  ),
+  FocusReflectionQuestion(
+    questionEn: 'Which saint is closely associated with founding Ethiopian monasteries, commemorated as አቡነ ተክለ ሃይማኖት?', questionAm: 'ገዳማትን በመመሥረት የሚታወቀው አቡነ ተክለ ሃይማኖት ማን ናቸው ተብሎ ይታሰባል?',
+    optionsEn: ['Saint George', 'Saint Tekle Haymanot', 'Saint Yared', 'Saint Gabriel'], optionsAm: ['ቅዱስ ጊዮርጊስ', 'አቡነ ተክለ ሃይማኖት', 'ቅዱስ ያሬድ', 'ቅዱስ ገብርኤል'],
+    correctIndex: 1,
+    explanationEn: 'አቡነ ተክለ ሃይማኖት is remembered for his life of prayer and his role in founding and reviving Ethiopian monasticism.',
+    explanationAm: 'አቡነ ተክለ ሃይማኖት በጸሎት ሕይወታቸውና ገዳማትን በማቋቋም በኢትዮጵያ ገዳማዊነት ትልቅ ስፍራ አላቸው።',
+  ),
+  FocusReflectionQuestion(
+    questionEn: 'Who composed the traditional hymnody still chanted in the EOTC today?', questionAm: 'ዛሬም በቤተ ክርስቲያናችን የሚዘመረውን ዜማ የደረሱት ማን ናቸው?',
+    optionsEn: ['Saint Yared', 'Saint Frumentius', 'Saint Gabra Manfas Qeddus', 'Abune Aregawi'], optionsAm: ['ቅዱስ ያሬድ', 'አባ ሰላማ', 'ገብረ መንፈስ ቅዱስ', 'አቡነ አረጋዊ'],
+    correctIndex: 0,
+    explanationEn: 'ቅዱስ ያሬድ composed the Zema (traditional chant) that remains central to EOTC worship.',
+    explanationAm: 'ቅዱስ ያሬድ ለቤተ ክርስቲያናችን ማዕከላዊ የሆነውን ዜማ ደረሱ።',
+  ),
+  FocusReflectionQuestion(
+    questionEn: 'What is the primary purpose of confession (ንስሐ) in the EOTC?', questionAm: 'የንስሐ ዓላማ በዋነኝነት ምንድን ነው?',
+    optionsEn: ['Public punishment', 'Reconciliation with God through a spiritual father', 'A yearly formality', 'Replacing prayer'], optionsAm: ['ለሕዝብ ቅጣት', 'በነፍስ አባት አማካኝነት ከእግዚአብሔር ጋር መታረቅ', 'የዓመት አንድ ጊዜ ግዴታ ብቻ', 'ጸሎትን መተካት'],
+    correctIndex: 1,
+    explanationEn: 'Confession is a private, healing reconciliation with God, guided by a spiritual father — not a public or shameful act.',
+    explanationAm: 'ንስሐ በነፍስ አባት እየተመራ ከእግዚአብሔር ጋር በሚስጥር የሚደረግ የፈውስ ዕርቅ ነው እንጂ የሕዝብ ወይም የውርደት ተግባር አይደለም።',
+  ),
+  FocusReflectionQuestion(
+    questionEn: 'What does ሥላሴ (Selassie) refer to?', questionAm: 'ሥላሴ ምን ማለት ነው?',
+    optionsEn: ['The Holy Trinity', 'The Holy Spirit alone', 'A church name only', 'An angel'], optionsAm: ['ቅድስት ሥላሴ', 'መንፈስ ቅዱስ ብቻ', 'የቤተ ክርስቲያን ስም ብቻ', 'መልአክ'],
+    correctIndex: 0,
+    explanationEn: 'ሥላሴ means the Holy Trinity — Father, Son, and Holy Spirit, one God in three Persons.',
+    explanationAm: 'ሥላሴ ማለት አብ፣ ወልድ፣ መንፈስ ቅዱስ በአንድነት የሚመለኩበት ሦስትነት ማለት ነው።',
+  ),
+];
+
+class SelfScreeningPrompt {
+  final String textEn, textAm;
+  const SelfScreeningPrompt({required this.textEn, required this.textAm});
+}
+
+const List<SelfScreeningPrompt> selfScreeningPromptPool = [
+  SelfScreeningPrompt(textEn: 'Why are you leaving your prayer time early?', textAm: 'ለምን ከጸሎት ጊዜዎ ቀድመው እየወጡ ነው?'),
+  SelfScreeningPrompt(textEn: 'How is your heart right now?', textAm: 'አሁን ልብዎ እንዴት ነው?'),
+  SelfScreeningPrompt(textEn: 'What is pulling your attention away?', textAm: 'ትኩረትዎን የሚስበው ምንድን ነው?'),
+  SelfScreeningPrompt(textEn: 'Is there anything weighing on you today?', textAm: 'ዛሬ የሚያስጨንቅዎት ነገር አለ?'),
+  SelfScreeningPrompt(textEn: 'What would help you return to this moment of prayer another time?', textAm: 'ወደዚህ የጸሎት ጊዜ ዳግም ለመመለስ የሚረዳዎት ምንድን ነው?'),
+];
+
+class ReflectionJournalEntry {
+  final DateTime date;
+  final int sessionMinutes;
+  final int minutesCompleted;
+  final List<Map<String, String>> answers; // [{'prompt': ..., 'answer': ...}]
+  const ReflectionJournalEntry({required this.date, required this.sessionMinutes, required this.minutesCompleted, required this.answers});
+  Map<String, dynamic> toJson() => {
+    'date': date.toIso8601String(), 'sessionMinutes': sessionMinutes, 'minutesCompleted': minutesCompleted, 'answers': answers,
+  };
+  factory ReflectionJournalEntry.fromJson(Map<String, dynamic> j) => ReflectionJournalEntry(
+    date: DateTime.tryParse(j['date'] ?? '') ?? DateTime.now(),
+    sessionMinutes: j['sessionMinutes'] ?? 0,
+    minutesCompleted: j['minutesCompleted'] ?? 0,
+    answers: (j['answers'] as List? ?? []).map((e) => Map<String, String>.from(e as Map)).toList(),
+  );
+}
+
+Future<void> _saveReflectionJournalEntry(ReflectionJournalEntry entry) async {
+  final prefs = await SharedPreferences.getInstance();
+  final raw = prefs.getString('reflection_journal');
+  final list = raw != null ? (jsonDecode(raw) as List) : [];
+  list.add(entry.toJson());
+  await prefs.setString('reflection_journal', jsonEncode(list));
+}
+
+class ReflectionGateScreen extends StatefulWidget {
+  final bool isDark;
+  final Duration sessionDuration;
+  final Duration remaining;
+  const ReflectionGateScreen({super.key, required this.isDark, required this.sessionDuration, required this.remaining});
+  @override
+  State<ReflectionGateScreen> createState() => _ReflectionGateScreenState();
+}
+
+class _ReflectionGateScreenState extends State<ReflectionGateScreen> {
+  // Step 0 = intro, 1-3 = trivia, 4-5 = self-screening, 6 = closing.
+  int _step = 0;
+  late final List<FocusReflectionQuestion> _trivia;
+  late final List<SelfScreeningPrompt> _selfPrompts;
+  int? _selectedOption;
+  bool _showExplanation = false;
+  final List<Map<String, String>> _selfAnswers = [];
+  final _answerCtrl = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    final rand = math.Random();
+    _trivia = (List<FocusReflectionQuestion>.from(focusReflectionQuestionPool)..shuffle(rand)).take(3).toList();
+    _selfPrompts = (List<SelfScreeningPrompt>.from(selfScreeningPromptPool)..shuffle(rand)).take(2).toList();
+  }
+
+  @override
+  void dispose() {
+    _answerCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _finishAndAllowExit() async {
+    final completedMinutes = widget.sessionDuration.inMinutes - widget.remaining.inMinutes;
+    await _saveReflectionJournalEntry(ReflectionJournalEntry(
+      date: DateTime.now(),
+      sessionMinutes: widget.sessionDuration.inMinutes,
+      minutesCompleted: completedMinutes,
+      answers: _selfAnswers,
+    ));
+    if (mounted) Navigator.of(context).pop(true);
+  }
+
+  void _urgentExit() => Navigator.of(context).pop(true);
+
+  void _selectOption(int i) {
+    if (_showExplanation) return;
+    setState(() { _selectedOption = i; _showExplanation = true; });
+  }
+
+  void _next() {
+    if (_step < 5) {
+      setState(() {
+        _step++;
+        _selectedOption = null;
+        _showExplanation = false;
+        _answerCtrl.clear();
+      });
+    } else {
+      setState(() => _step = 6);
+    }
+  }
+
+  void _saveSelfAnswerAndNext(SelfScreeningPrompt prompt) {
+    _selfAnswers.add({'prompt': prompt.textEn, 'answer': _answerCtrl.text.trim()});
+    _next();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppColors(widget.isDark);
+    return PopScope(
+      canPop: false,
+      child: Scaffold(
+        backgroundColor: const Color(0xFF07060F),
+        body: SafeArea(
+          child: Column(children: [
+            Expanded(child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 400),
+              transitionBuilder: (child, anim) => FadeTransition(opacity: anim, child: SlideTransition(
+                position: Tween(begin: const Offset(0, 0.04), end: Offset.zero).animate(anim), child: child)),
+              child: KeyedSubtree(key: ValueKey(_step), child: _stepContent(c)),
+            )),
+            Padding(
+              padding: const EdgeInsets.all(20),
+              child: GestureDetector(
+                onTap: _urgentExit,
+                child: Text('I need to leave urgently\nአስቸኳይ ጉዳይ አለብኝ፣ አሁን መውጣት እፈልጋለሁ',
+                    textAlign: TextAlign.center, style: TextStyle(color: Colors.white.withAlpha(90), fontSize: 11.5, height: 1.5)),
+              ),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _stepContent(AppColors c) {
+    if (_step == 0) return _introStep(c);
+    if (_step >= 1 && _step <= 3) return _triviaStep(c, _trivia[_step - 1]);
+    if (_step == 4 || _step == 5) return _selfScreeningStep(c, _selfPrompts[_step - 4]);
+    return _closingStep(c);
+  }
+
+  Widget _introStep(AppColors c) => Center(child: Padding(
+    padding: const EdgeInsets.all(32),
+    child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+      const Text('🕊️', style: TextStyle(fontSize: 56)),
+      const SizedBox(height: 24),
+      const Text('Before you go — take a moment', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w700), textAlign: TextAlign.center),
+      const SizedBox(height: 8),
+      const Text('ከመውጣትዎ በፊት — ትንሽ ያሰላስሉ', style: TextStyle(color: Color(0xFFC9A84C), fontSize: 14, fontStyle: FontStyle.italic), textAlign: TextAlign.center),
+      const SizedBox(height: 24),
+      Text('A few gentle questions — three about the faith, two just for you. No wrong answers here.\n\nትንሽ ገር ጥያቄዎች — ሦስት ስለ እምነት፣ ሁለት ለራስዎ ብቻ። እዚህ ስህተት መልስ የለም።',
+          textAlign: TextAlign.center, style: TextStyle(color: Colors.white.withAlpha(180), fontSize: 13, height: 1.8)),
+      const SizedBox(height: 36),
+      _primaryButton(c, 'Continue', _next),
+    ]),
+  ));
+
+  Widget _triviaStep(AppColors c, FocusReflectionQuestion q) => Padding(
+    padding: const EdgeInsets.all(24),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const SizedBox(height: 20),
+      Text('QUESTION $_step OF 3', style: TextStyle(color: c.gold, fontSize: 11, letterSpacing: 2, fontWeight: FontWeight.w700)),
+      const SizedBox(height: 16),
+      Text(q.questionEn, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700, height: 1.4)),
+      const SizedBox(height: 4),
+      Text(q.questionAm, style: TextStyle(color: Colors.white.withAlpha(180), fontSize: 13, fontStyle: FontStyle.italic)),
+      const SizedBox(height: 24),
+      ...List.generate(q.optionsEn.length, (i) {
+        final isCorrect = i == q.correctIndex;
+        final isSelected = i == _selectedOption;
+        Color borderColor = Colors.white24;
+        Color? fillColor;
+        if (_showExplanation) {
+          if (isCorrect) { borderColor = const Color(0xFF4CAF50); fillColor = const Color(0xFF4CAF50).withAlpha(30); }
+          else if (isSelected) { borderColor = const Color(0xFFE57373); fillColor = const Color(0xFFE57373).withAlpha(30); }
+        }
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: GestureDetector(
+            onTap: () => _selectOption(i),
+            child: Container(
+              width: double.infinity, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+              decoration: BoxDecoration(border: Border.all(color: borderColor, width: 1), borderRadius: BorderRadius.circular(12), color: fillColor),
+              child: Row(children: [
+                Expanded(child: Text(q.optionsEn[i], style: const TextStyle(color: Colors.white, fontSize: 13.5))),
+                if (_showExplanation && isCorrect) const Icon(Icons.check_circle, color: Color(0xFF4CAF50), size: 18),
+                if (_showExplanation && isSelected && !isCorrect) const Icon(Icons.cancel, color: Color(0xFFE57373), size: 18),
+              ]),
+            ),
+          ),
+        );
+      }),
+      if (_showExplanation) ...[
+        const SizedBox(height: 8),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(color: c.gold.withAlpha(20), borderRadius: BorderRadius.circular(12), border: Border.all(color: c.gold.withAlpha(90))),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(q.explanationEn, style: TextStyle(color: Colors.white.withAlpha(220), fontSize: 12.5, height: 1.6)),
+            const SizedBox(height: 6),
+            Text(q.explanationAm, style: TextStyle(color: Colors.white.withAlpha(160), fontSize: 11.5, fontStyle: FontStyle.italic, height: 1.6)),
+          ]),
+        ),
+        const SizedBox(height: 24),
+        _primaryButton(c, 'Continue', _next),
+      ],
+    ]),
+  );
+
+  Widget _selfScreeningStep(AppColors c, SelfScreeningPrompt prompt) => Padding(
+    padding: const EdgeInsets.all(24),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
+      Text('FOR YOU — ${_step - 3} OF 2', style: TextStyle(color: c.gold, fontSize: 11, letterSpacing: 2, fontWeight: FontWeight.w700)),
+      const SizedBox(height: 16),
+      Text(prompt.textEn, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700, height: 1.4)),
+      const SizedBox(height: 4),
+      Text(prompt.textAm, style: TextStyle(color: Colors.white.withAlpha(180), fontSize: 13, fontStyle: FontStyle.italic)),
+      const SizedBox(height: 8),
+      Text('Just for your own awareness — saved privately to your journal.\nለራስዎ ግንዛቤ ብቻ — በሚስጥር ወደ ማስታወሻዎ ይቀመጣል።',
+          style: TextStyle(color: Colors.white.withAlpha(120), fontSize: 11, height: 1.5)),
+      const SizedBox(height: 20),
+      TextField(
+        controller: _answerCtrl, maxLines: 4, style: const TextStyle(color: Colors.white, fontSize: 13.5),
+        decoration: InputDecoration(
+          hintText: 'Write as much or as little as you like…', hintStyle: TextStyle(color: Colors.white.withAlpha(90)),
+          filled: true, fillColor: Colors.white.withAlpha(15),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.white24)),
+          enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.white24)),
+          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: c.gold, width: 1.5)),
+        ),
+      ),
+      const SizedBox(height: 24),
+      _primaryButton(c, _step == 5 ? 'Finish' : 'Continue', () => _saveSelfAnswerAndNext(prompt)),
+    ]),
+  );
+
+  Widget _closingStep(AppColors c) => Center(child: Padding(
+    padding: const EdgeInsets.all(32),
+    child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+      const Text('☩', style: TextStyle(fontSize: 56, color: Color(0xFFE8C878))),
+      const SizedBox(height: 24),
+      const Text('Thank you. You may go in peace.', style: TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.w700), textAlign: TextAlign.center),
+      const SizedBox(height: 8),
+      const Text('እናመሰግናለን። በሰላም ይሂዱ።', style: TextStyle(color: Color(0xFFC9A84C), fontSize: 14, fontStyle: FontStyle.italic), textAlign: TextAlign.center),
+      const SizedBox(height: 36),
+      _primaryButton(c, 'Exit', _finishAndAllowExit),
+    ]),
+  ));
+
+  Widget _primaryButton(AppColors c, String label, VoidCallback onTap) => GestureDetector(
+    onTap: onTap,
+    child: Container(
+      width: double.infinity, padding: const EdgeInsets.symmetric(vertical: 15),
+      decoration: BoxDecoration(gradient: const LinearGradient(colors: [Color(0xFFE3C878), Color(0xFFC9A84C), Color(0xFFA98937)]), borderRadius: BorderRadius.circular(14)),
+      child: Center(child: Text(label, style: const TextStyle(color: Color(0xFF0F0505), fontWeight: FontWeight.w800, fontSize: 14))),
+    ),
+  );
+}
+
+class ReflectionJournalScreen extends StatefulWidget {
+  final bool isDark;
+  const ReflectionJournalScreen({super.key, required this.isDark});
+  @override
+  State<ReflectionJournalScreen> createState() => _ReflectionJournalScreenState();
+}
+
+class _ReflectionJournalScreenState extends State<ReflectionJournalScreen> {
+  List<ReflectionJournalEntry> _entries = [];
+  bool _loaded = false;
+
+  @override
+  void initState() { super.initState(); _load(); }
+
+  Future<void> _load() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString('reflection_journal');
+    if (raw != null) {
+      final list = jsonDecode(raw) as List;
+      _entries = list.map((e) => ReflectionJournalEntry.fromJson(e)).toList().reversed.toList();
+    }
+    if (mounted) setState(() => _loaded = true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppColors(widget.isDark);
+    return Scaffold(
+      backgroundColor: c.bg,
+      body: SafeArea(child: Column(children: [
+        Container(
+          color: c.hero, padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+          child: Row(children: [
+            GestureDetector(onTap: () => Navigator.pop(context), child: Icon(Icons.arrow_back_ios, color: c.gold, size: 20)),
+            const SizedBox(width: 10),
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('REFLECTION JOURNAL', style: TextStyle(fontSize: 16, color: c.text, letterSpacing: 2, fontWeight: FontWeight.w800)),
+              Text('የማሰላሰያ ማስታወሻ — private, only for you', style: TextStyle(fontSize: 12, color: c.muted, fontStyle: FontStyle.italic)),
+            ]),
+          ]),
+        ),
+        Divider(color: c.border, height: 0.5),
+        Expanded(
+          child: !_loaded
+              ? Center(child: CircularProgressIndicator(color: c.gold))
+              : _entries.isEmpty
+                  ? Center(child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                        const Text('📔', style: TextStyle(fontSize: 48)),
+                        const SizedBox(height: 16),
+                        Text('Nothing here yet', style: TextStyle(fontSize: 15, color: c.muted, fontWeight: FontWeight.w600)),
+                        const SizedBox(height: 8),
+                        Text('Entries appear when you leave a focus session early', style: TextStyle(fontSize: 13, color: c.muted, fontStyle: FontStyle.italic), textAlign: TextAlign.center),
+                      ]),
+                    ))
+                  : ListView.builder(
+                      padding: const EdgeInsets.all(14),
+                      itemCount: _entries.length,
+                      itemBuilder: (context, i) {
+                        final e = _entries[i];
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 14),
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(color: c.card, borderRadius: BorderRadius.circular(16), border: Border.all(color: c.border, width: 0.5)),
+                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Row(children: [
+                              Text('${e.date.year}-${e.date.month.toString().padLeft(2, '0')}-${e.date.day.toString().padLeft(2, '0')}',
+                                  style: TextStyle(color: c.text, fontWeight: FontWeight.w700, fontSize: 13)),
+                              const Spacer(),
+                              Text('${e.minutesCompleted}/${e.sessionMinutes} min', style: TextStyle(color: c.gold, fontSize: 12, fontWeight: FontWeight.w600)),
+                            ]),
+                            const Divider(height: 20),
+                            ...e.answers.map((a) => Padding(
+                                  padding: const EdgeInsets.only(bottom: 10),
+                                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                    Text(a['prompt'] ?? '', style: TextStyle(color: c.muted, fontSize: 12, fontStyle: FontStyle.italic)),
+                                    const SizedBox(height: 3),
+                                    Text((a['answer']?.isEmpty ?? true) ? '(left blank)' : a['answer']!,
+                                        style: TextStyle(color: c.text, fontSize: 13.5, height: 1.4)),
+                                  ]),
+                                )),
+                          ]),
+                        );
+                      },
+                    ),
+        ),
+      ])),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════
+// AI ASSISTANT — የነፍስ አባት አማካሪ (Spiritual Q&A Helper)
+//
+// General-guidance only — see aiSystemPrompt (top of file) and the in-UI
+// disclaimer below. Never presents itself as a substitute for a real
+// spiritual father. If GEMINI_API_KEY is empty, no network call is made.
+// ═══════════════════════════════════════════════
+
+class ChatMessage {
+  final String role; // 'user' | 'assistant'
+  final String text;
+  final DateTime timestamp;
+  ChatMessage({required this.role, required this.text, required this.timestamp});
+  Map<String, dynamic> toJson() => {'role': role, 'text': text, 'timestamp': timestamp.toIso8601String()};
+  factory ChatMessage.fromJson(Map<String, dynamic> j) => ChatMessage(
+    role: j['role'] ?? 'assistant',
+    text: j['text'] ?? '',
+    timestamp: DateTime.tryParse(j['timestamp'] ?? '') ?? DateTime.now(),
+  );
+}
+
+const List<String> aiStarterQuestions = [
+  'What does ንስሐ mean?',
+  'Which fast are we in now?',
+  'How do I prepare for confession?',
+  'Who is today\'s saint?',
+  'Why do we fast on Wednesdays and Fridays?',
+];
+
+enum AiResultKind { ok, notConfigured, rateLimited, offline, timeout, apiError }
+
+class AiResult {
+  final AiResultKind kind;
+  final String text;
+  final int? questionsRemainingToday;
+  const AiResult({required this.kind, required this.text, this.questionsRemainingToday});
+}
+
+String _aiDateKey(DateTime d) => '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+/// Per-user daily question cap — the Gemini free tier is shared across
+/// every install of this app, so each signed-in user gets a small personal
+/// budget rather than one person being able to exhaust it for everyone.
+/// Local-first (SharedPreferences) for instant checks, mirrored to
+/// users/{uid} in Firestore (best-effort) so the count survives reinstalls.
+class AiRateLimiter {
+  static const int dailyLimit = 5;
+
+  static Future<int> remainingToday() async {
+    final prefs = await SharedPreferences.getInstance();
+    final today = _aiDateKey(DateTime.now());
+    final used = (prefs.getString('ai_questions_date') == today) ? (prefs.getInt('ai_questions_today') ?? 0) : 0;
+    return (dailyLimit - used).clamp(0, dailyLimit);
+  }
+
+  /// Consumes one question for today. Returns the remaining count after
+  /// consuming, or null if today's limit was already reached.
+  static Future<int?> tryConsume() async {
+    final prefs = await SharedPreferences.getInstance();
+    final today = _aiDateKey(DateTime.now());
+    final used = (prefs.getString('ai_questions_date') == today) ? (prefs.getInt('ai_questions_today') ?? 0) : 0;
+    if (used >= dailyLimit) return null;
+    final newUsed = used + 1;
+    await prefs.setString('ai_questions_date', today);
+    await prefs.setInt('ai_questions_today', newUsed);
+    _mirrorToFirestore(today, newUsed);
+    return dailyLimit - newUsed;
+  }
+
+  /// Gives back a consumed question when a call failed for reasons that
+  /// were not the user's fault (offline, timeout, a broken response) —
+  /// only a genuine reply, a hit against Gemini's own rate limit, or the
+  /// local daily cap should actually spend the user's budget.
+  static Future<void> refundOne() async {
+    final prefs = await SharedPreferences.getInstance();
+    final today = _aiDateKey(DateTime.now());
+    if (prefs.getString('ai_questions_date') != today) return;
+    final used = prefs.getInt('ai_questions_today') ?? 0;
+    if (used <= 0) return;
+    final newUsed = used - 1;
+    await prefs.setInt('ai_questions_today', newUsed);
+    _mirrorToFirestore(today, newUsed);
+  }
+
+  static void _mirrorToFirestore(String today, int used) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    unawaited(FirebaseFirestore.instance.collection('users').doc(uid)
+        .update({'aiQuestionsToday': used, 'aiQuestionsDate': today}).catchError((_) {}));
+  }
+
+  /// Pulls the Firestore-mirrored count down to local storage if it's
+  /// higher than what's stored locally for today — covers the reinstall
+  /// case, where local prefs reset but the Firestore doc still remembers.
+  static Future<void> syncFromFirestore() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    try {
+      final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      final remoteDate = doc.data()?['aiQuestionsDate'] as String?;
+      final remoteUsed = doc.data()?['aiQuestionsToday'] as int?;
+      final today = _aiDateKey(DateTime.now());
+      if (remoteDate != today || remoteUsed == null) return;
+      final prefs = await SharedPreferences.getInstance();
+      final localUsed = (prefs.getString('ai_questions_date') == today) ? (prefs.getInt('ai_questions_today') ?? 0) : 0;
+      if (remoteUsed > localUsed) {
+        await prefs.setString('ai_questions_date', today);
+        await prefs.setInt('ai_questions_today', remoteUsed);
+      }
+    } catch (_) {
+      // Offline or no doc yet — local-first state is still correct enough.
+    }
+  }
+}
+
+/// All Gemini network calls live here so that migrating to a Firebase
+/// Cloud Function later (see the security note on GEMINI_API_KEY above) is
+/// a change to this one class, not a hunt through the UI code.
+class GeminiService {
+  // gemini-2.5-flash was retired ("no longer available to new users" per
+  // the API's own error) — Google's current Flash model as of this build.
+  static const String _model = 'gemini-3.6-flash';
+  static const Duration _timeout = Duration(seconds: 30);
+  static const int _maxRetries = 2;
+
+  static bool get isConfigured => GEMINI_API_KEY.trim().isNotEmpty;
+
+  static const _notConfiguredMessage = "The assistant isn't available yet.\nረዳቱ ገና ዝግጁ አይደለም።";
+  static const _dailyLimitMessage = "You've used today's questions. The assistant will be ready again tomorrow 🕊️ — for anything urgent, please speak with your spiritual father.\n\nዛሬ የተፈቀደልዎትን ጥያቄዎች ተጠቅመዋል። ረዳቱ ነገ እንደገና ዝግጁ ይሆናል 🕊️ — ለአስቸኳይ ጉዳይ እባክዎ የነፍስ አባትዎን ያነጋግሩ።";
+  static const _quotaMessage = "The assistant is resting right now. Please try again in a little while 🕊️\n\nረዳቱ አሁን እያረፈ ነው። እባክዎ ትንሽ ቆይተው ደግመው ይሞክሩ 🕊️";
+  static const _offlineMessage = "You appear to be offline. Please check your connection.\n\nበመስመር ላይ አይመስሉም። እባክዎ ግንኙነትዎን ያረጋግጡ።";
+  static const _timeoutMessage = "That took too long. Please try again.\n\nይህ በጣም ረጅም ጊዜ ወስዷል። እባክዎ ደግመው ይሞክሩ።";
+  static const _apiErrorMessage = "Something went wrong. Please try again shortly.\n\nችግር ተፈጥሯል። እባክዎ ትንሽ ቆይተው ደግመው ይሞክሩ።";
+
+  /// Sends [question] to Gemini with the last ~10 messages of [history] as
+  /// context. Never throws — every failure mode maps to a graceful,
+  /// bilingual AiResult instead.
+  static Future<AiResult> ask(List<ChatMessage> history, String question) async {
+    if (!isConfigured) return const AiResult(kind: AiResultKind.notConfigured, text: _notConfiguredMessage);
+
+    final remaining = await AiRateLimiter.tryConsume();
+    if (remaining == null) return const AiResult(kind: AiResultKind.rateLimited, text: _dailyLimitMessage);
+
+    final contents = _buildContents(history, question);
+    for (int attempt = 0; attempt <= _maxRetries; attempt++) {
+      try {
+        final uri = Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/$_model:generateContent?key=$GEMINI_API_KEY');
+        final response = await http.post(
+          uri,
+          headers: {'content-type': 'application/json'},
+          body: jsonEncode({
+            'system_instruction': {'parts': [{'text': aiSystemPrompt}]},
+            'contents': contents,
+            'generationConfig': {'maxOutputTokens': 500},
+          }),
+        ).timeout(_timeout);
+
+        if (response.statusCode == 429) {
+          return AiResult(kind: AiResultKind.rateLimited, text: _quotaMessage, questionsRemainingToday: remaining);
+        }
+        if (response.statusCode >= 500 && attempt < _maxRetries) {
+          await Future.delayed(Duration(milliseconds: 400 * (1 << attempt)));
+          continue;
+        }
+        if (response.statusCode != 200) {
+          await AiRateLimiter.refundOne();
+          return AiResult(kind: AiResultKind.apiError, text: _apiErrorMessage, questionsRemainingToday: remaining + 1);
+        }
+
+        final text = _extractText(jsonDecode(response.body) as Map<String, dynamic>);
+        if (text == null || text.trim().isEmpty) {
+          await AiRateLimiter.refundOne();
+          return AiResult(kind: AiResultKind.apiError, text: _apiErrorMessage, questionsRemainingToday: remaining + 1);
+        }
+        return AiResult(kind: AiResultKind.ok, text: text.trim(), questionsRemainingToday: remaining);
+      } on TimeoutException {
+        if (attempt < _maxRetries) { await Future.delayed(Duration(milliseconds: 400 * (1 << attempt))); continue; }
+        await AiRateLimiter.refundOne();
+        return AiResult(kind: AiResultKind.timeout, text: _timeoutMessage, questionsRemainingToday: remaining + 1);
+      } on SocketException {
+        await AiRateLimiter.refundOne();
+        return AiResult(kind: AiResultKind.offline, text: _offlineMessage, questionsRemainingToday: remaining + 1);
+      } catch (e) {
+        if (attempt < _maxRetries) { await Future.delayed(Duration(milliseconds: 400 * (1 << attempt))); continue; }
+        debugPrint('Gemini call failed: $e');
+      }
+    }
+    await AiRateLimiter.refundOne();
+    return AiResult(kind: AiResultKind.apiError, text: _apiErrorMessage, questionsRemainingToday: remaining + 1);
+  }
+
+  static List<Map<String, dynamic>> _buildContents(List<ChatMessage> history, String question) {
+    final recent = history.length > 10 ? history.sublist(history.length - 10) : history;
+    return [
+      ...recent.map((m) => {'role': m.role == 'user' ? 'user' : 'model', 'parts': [{'text': m.text}]}),
+      {'role': 'user', 'parts': [{'text': question}]},
+    ];
+  }
+
+  static String? _extractText(Map<String, dynamic> data) {
+    try {
+      final candidates = data['candidates'] as List?;
+      if (candidates == null || candidates.isEmpty) return null;
+      final content = (candidates.first as Map<String, dynamic>)['content'] as Map<String, dynamic>?;
+      final parts = content?['parts'] as List?;
+      if (parts == null || parts.isEmpty) return null;
+      return (parts.first as Map<String, dynamic>)['text'] as String?;
+    } catch (_) {
+      return null;
+    }
+  }
+}
+
+class AiAssistantScreen extends StatefulWidget {
+  final bool isDark;
+  const AiAssistantScreen({super.key, required this.isDark});
+  @override
+  State<AiAssistantScreen> createState() => _AiAssistantScreenState();
+}
+
+class _AiAssistantScreenState extends State<AiAssistantScreen> {
+  final List<ChatMessage> _messages = [];
+  final _inputCtrl = TextEditingController();
+  final _scrollCtrl = ScrollController();
+  bool _sending = false;
+  bool _loaded = false;
+  int? _remainingToday;
+
+  @override
+  void initState() { super.initState(); _load(); }
+
+  Future<void> _load() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString('ai_chat_history');
+    if (raw != null) {
+      final list = jsonDecode(raw) as List;
+      _messages.addAll(list.map((e) => ChatMessage.fromJson(e)));
+    }
+    if (GeminiService.isConfigured) {
+      await AiRateLimiter.syncFromFirestore();
+      _remainingToday = await AiRateLimiter.remainingToday();
+    }
+    if (mounted) setState(() => _loaded = true);
+  }
+
+  Future<void> _persist() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('ai_chat_history', jsonEncode(_messages.map((m) => m.toJson()).toList()));
+  }
+
+  Future<void> _send(String text) async {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty || _sending) return;
+    final capped = trimmed.length > 500 ? trimmed.substring(0, 500) : trimmed;
+    final history = List<ChatMessage>.from(_messages);
+    setState(() {
+      _messages.add(ChatMessage(role: 'user', text: capped, timestamp: DateTime.now()));
+      _sending = true;
+    });
+    _inputCtrl.clear();
+    _scrollToEnd();
+    final result = await GeminiService.ask(history, capped);
+    if (!mounted) return;
+    setState(() {
+      _messages.add(ChatMessage(role: 'assistant', text: result.text, timestamp: DateTime.now()));
+      _sending = false;
+      if (result.questionsRemainingToday != null) _remainingToday = result.questionsRemainingToday;
+    });
+    await _persist();
+    _scrollToEnd();
+  }
+
+  void _scrollToEnd() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollCtrl.hasClients) {
+        _scrollCtrl.animateTo(_scrollCtrl.position.maxScrollExtent, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+      }
+    });
+  }
+
+  Future<void> _clearHistory() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('ai_chat_history');
+    if (mounted) setState(() => _messages.clear());
+  }
+
+  @override
+  void dispose() {
+    _inputCtrl.dispose();
+    _scrollCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppColors(widget.isDark);
+    return Scaffold(
+      backgroundColor: c.bg,
+      body: SafeArea(child: Column(children: [
+        Container(
+          color: c.hero, padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+          child: Row(children: [
+            GestureDetector(onTap: () => Navigator.pop(context), child: Icon(Icons.arrow_back_ios, color: c.gold, size: 20)),
+            const SizedBox(width: 10),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('ሠናይ (Senay)', style: TextStyle(fontSize: 15, color: c.text, fontWeight: FontWeight.w800)),
+              Text('Your spiritual friend & guide', style: TextStyle(fontSize: 12, color: c.muted, fontStyle: FontStyle.italic)),
+            ])),
+            if (_messages.isNotEmpty)
+              GestureDetector(onTap: _clearHistory, child: Icon(Icons.delete_outline, color: c.muted, size: 20)),
+          ]),
+        ),
+        Container(
+          width: double.infinity, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          color: c.goldBg,
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(
+              'Senay is an AI helper, not a substitute for your spiritual father (የነፍስ አባት).\nሠናይ የAI ረዳት እንጂ የነፍስ አባትዎን አይተካም።',
+              style: TextStyle(color: c.text, fontSize: 11, height: 1.5),
+            ),
+            if (GeminiService.isConfigured && _remainingToday != null) ...[
+              const SizedBox(height: 6),
+              Text('$_remainingToday of ${AiRateLimiter.dailyLimit} questions left today 🕊️',
+                  style: TextStyle(color: c.gold, fontSize: 10.5, fontWeight: FontWeight.w600)),
+            ],
+          ]),
+        ),
+        Divider(color: c.border, height: 0.5),
+        Expanded(
+          child: !_loaded
+              ? Center(child: CircularProgressIndicator(color: c.gold))
+              : !GeminiService.isConfigured
+                  ? _notConfigured(c)
+                  : _messages.isEmpty
+                      ? _starterView(c)
+                      : ListView.builder(
+                          controller: _scrollCtrl,
+                          padding: const EdgeInsets.all(14),
+                          itemCount: _messages.length + (_sending ? 1 : 0),
+                          itemBuilder: (context, i) {
+                            if (i >= _messages.length) return _typingBubble(c);
+                            return _bubble(c, _messages[i]);
+                          },
+                        ),
+        ),
+        if (GeminiService.isConfigured) _inputRow(c),
+      ])),
+    );
+  }
+
+  Widget _notConfigured(AppColors c) => Center(child: Padding(
+    padding: const EdgeInsets.all(24),
+    child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+      const Text('🕯️', style: TextStyle(fontSize: 48)),
+      const SizedBox(height: 16),
+      Text('The assistant isn\'t available yet', style: TextStyle(fontSize: 15, color: c.muted, fontWeight: FontWeight.w600), textAlign: TextAlign.center),
+      const SizedBox(height: 8),
+      Text('ረዳቱ ገና ዝግጁ አይደለም', style: TextStyle(fontSize: 13, color: c.muted, fontStyle: FontStyle.italic), textAlign: TextAlign.center),
+    ]),
+  ));
+
+  Widget _starterView(AppColors c) => SingleChildScrollView(
+    padding: const EdgeInsets.all(20),
+    child: Column(children: [
+      const SizedBox(height: 10),
+      const Text('☩', style: TextStyle(fontSize: 44)),
+      const SizedBox(height: 14),
+      Text('ሰላም! I\'m Senay — ask me anything about our faith 🕊️', style: TextStyle(fontSize: 16, color: c.text, fontWeight: FontWeight.w700), textAlign: TextAlign.center),
+      const SizedBox(height: 20),
+      ...aiStarterQuestions.map((q) => Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: GestureDetector(
+              onTap: () => _send(q),
+              child: Container(
+                width: double.infinity, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(color: c.card, borderRadius: BorderRadius.circular(14), border: Border.all(color: c.border, width: 0.5)),
+                child: Text(q, style: TextStyle(color: c.text, fontSize: 13.5)),
+              ),
+            ),
+          )),
+    ]),
+  );
+
+  Widget _bubble(AppColors c, ChatMessage m) {
+    final isUser = m.role == 'user';
+    return Align(
+      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
+        decoration: BoxDecoration(
+          color: isUser ? c.gold : c.card,
+          borderRadius: BorderRadius.circular(16),
+          border: isUser ? null : Border.all(color: c.border, width: 0.5),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          if (!isUser) ...[Text('☩', style: TextStyle(fontSize: 14, color: c.gold)), const SizedBox(width: 8)],
+          Flexible(child: Text(m.text,
+              style: TextStyle(color: isUser ? (widget.isDark ? const Color(0xFF0F0505) : Colors.white) : c.text, fontSize: 13.5, height: 1.5))),
+        ]),
+      ),
+    );
+  }
+
+  Widget _typingBubble(AppColors c) => Align(
+    alignment: Alignment.centerLeft,
+    child: Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(color: c.card, borderRadius: BorderRadius.circular(16), border: Border.all(color: c.border, width: 0.5)),
+      child: const _AngelTypingIndicator(),
+    ),
+  );
+
+  Widget _inputRow(AppColors c) => Container(
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(color: c.hero, border: Border(top: BorderSide(color: c.border, width: 0.5))),
+    child: Row(children: [
+      Expanded(child: TextField(
+        controller: _inputCtrl, style: TextStyle(color: c.text, fontSize: 13.5),
+        minLines: 1, maxLines: 4,
+        maxLength: 500,
+        decoration: InputDecoration(
+          hintText: 'Ask a question…', hintStyle: TextStyle(color: c.muted),
+          filled: true, fillColor: c.card,
+          counterStyle: TextStyle(color: c.muted, fontSize: 10),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide(color: c.border)),
+          enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide(color: c.border)),
+          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide(color: c.gold, width: 1.5)),
+        ),
+        onSubmitted: _send,
+      )),
+      const SizedBox(width: 10),
+      GestureDetector(
+        onTap: _sending ? null : () => _send(_inputCtrl.text),
+        child: Container(
+          width: 44, height: 44,
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(colors: [Color(0xFFE3C878), Color(0xFFC9A84C), Color(0xFFA98937)]),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(Icons.send, color: widget.isDark ? const Color(0xFF0F0505) : Colors.white, size: 18),
+        ),
+      ),
+    ]),
+  );
+}
+
+/// A small animated angel — a miniature of the floating companion — used
+/// as the chat's "thinking" indicator: its wings flutter while a reply is
+/// on its way, rather than a generic three-dot spinner.
+class _AngelTypingIndicator extends StatefulWidget {
+  const _AngelTypingIndicator();
+  @override
+  State<_AngelTypingIndicator> createState() => _AngelTypingIndicatorState();
+}
+
+class _AngelTypingIndicatorState extends State<_AngelTypingIndicator> with SingleTickerProviderStateMixin {
+  late final AnimationController _c;
+  @override
+  void initState() { super.initState(); _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 900))..repeat(); }
+  @override
+  void dispose() { _c.dispose(); super.dispose(); }
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: _c,
+    builder: (context, _) => SizedBox(
+      width: 32, height: 32,
+      child: CustomPaint(painter: _AngelPainter(wingPhase: _c.value, haloPhase: (math.sin(_c.value * 2 * math.pi) + 1) / 2)),
+    ),
+  );
 }
 

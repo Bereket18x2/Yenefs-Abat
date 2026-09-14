@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "817665850452",
+    "project_id": "yenefs-abat",
+    "storage_bucket": "yenefs-abat.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:817665850452:android:81e4cecb0abe78c49c01c1",
+        "android_client_info": {
+          "package_name": "com.yenefsabat.yenefs_abat"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCuFFNuVsUM2ZWsTqveBER-sxJRNJPH8x0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,0 +1,93 @@
+rules_version = '2';
+
+// Yenefs Abat — Firestore security rules.
+//
+// ⚠️ THESE MUST BE PUBLISHED to actually take effect — having this file in
+// the repo does nothing on its own. Run:
+//
+//   firebase deploy --only firestore:rules
+//
+// (or paste this file's contents into the Firebase console under
+// Firestore Database → Rules → Publish.) If your currently-deployed rules
+// only cover users/{userId} and deny everything else (as they did when
+// this bug was reported), that mismatch — not a real network problem — is
+// exactly what was causing Family creation to fail with a permission
+// error that the app was misreporting as "no connection".
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Each user's own profile + streak mirror. Only the signed-in owner
+    // may read or write their own document; nobody may delete it.
+    match /users/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow create: if request.auth != null && request.auth.uid == uid;
+      allow update: if request.auth != null && request.auth.uid == uid;
+      allow delete: if false;
+    }
+
+    // A lightweight public index mapping an invite code (the document ID)
+    // to the familyId it belongs to. This exists ONLY so "join by code"
+    // can resolve a typed code to a family without needing read access to
+    // the family document itself (which stays members-only, below).
+    //
+    // This is a deliberate design choice, not a shortcut: Firestore
+    // rejects a *query* (e.g. `where('inviteCode', isEqualTo: code)`)
+    // outright if its security rule depends on resource.data.memberUids,
+    // because Firestore can't prove in advance that every possible match
+    // would satisfy the rule — so a direct query against `families` for
+    // "does this code exist" can never work under a members-only rule.
+    // A single-document get() by a known ID (the code itself) doesn't
+    // have that limitation, which is why this index is a separate
+    // collection keyed by the code.
+    match /inviteCodes/{code} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null
+                    && request.resource.data.keys().hasOnly(['familyId', 'createdAt'])
+                    && request.resource.data.familyId is string;
+      allow update, delete: if false;
+    }
+
+    // A family group. Only current members may read it or make ordinary
+    // updates. Joining is the one exception: a non-member may update the
+    // document, but ONLY to append their own uid to memberUids and touch
+    // nothing else — this is what lets "join by invite code" work without
+    // opening the document to arbitrary writes.
+    match /families/{familyId} {
+      allow read: if request.auth != null
+                  && request.auth.uid in resource.data.memberUids;
+
+      allow create: if request.auth != null
+                  && request.auth.uid == request.resource.data.createdBy
+                  && request.resource.data.memberUids == [request.auth.uid];
+
+      allow update: if request.auth != null && (
+                    // existing members may update the document freely
+                    request.auth.uid in resource.data.memberUids
+                    ||
+                    // OR a non-member may join by adding only themselves
+                    // to memberUids, changing nothing else
+                    (
+                      request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberUids']) &&
+                      request.resource.data.memberUids == resource.data.memberUids.concat([request.auth.uid])
+                    )
+                  );
+
+      allow delete: if false;
+
+      // Shared prayer request list within a family.
+      match /prayerRequests/{requestId} {
+        function isMember() {
+          return request.auth != null &&
+                 request.auth.uid in get(/databases/$(database)/documents/families/$(familyId)).data.memberUids;
+        }
+        allow read: if isMember();
+        allow create: if isMember() && request.auth.uid == request.resource.data.authorUid;
+        // Updates are for the "I prayed for this" counter/array, which any
+        // member may touch (not just the original author).
+        allow update: if isMember();
+        allow delete: if false;
+      }
+    }
+  }
+}

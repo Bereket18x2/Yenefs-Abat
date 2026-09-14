@@ -10,16 +10,16 @@
 <meta property="og:type" content="website">
 <meta property="og:title" content="Yenefs Abat | የነፍስ አባት — Father of the Soul">
 <meta property="og:description" content="A spiritual companion app for the Ethiopian Orthodox Tewahedo faith. Confession guidance, prayer reminders, the Orthodox calendar, daily Synaxarium, and finding the nearest church.">
-<meta property="og:image" content="https://yenefsabat.com/logo.png">
+<meta property="og:image" content="https://yenefsabat.com/logo-og.jpg">
 <meta property="og:url" content="https://yenefsabat.com">
 <meta property="og:site_name" content="Yenefs Abat">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Yenefs Abat | የነፍስ አባት">
 <meta name="twitter:description" content="A spiritual companion app for the Ethiopian Orthodox Tewahedo faith.">
-<meta name="twitter:image" content="https://yenefsabat.com/logo.png">
+<meta name="twitter:image" content="https://yenefsabat.com/logo-og.jpg">
 
-<link rel="icon" type="image/png" href="logo.png">
-<link rel="apple-touch-icon" href="logo.png">
+<link rel="icon" type="image/png" href="logo-32.png">
+<link rel="apple-touch-icon" href="logo-180.png">
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -117,7 +117,7 @@ header.nav{
 }
 header.nav.solid{ padding:14px 6vw; background:#07060ae6; backdrop-filter:blur(16px); border-color:var(--line); }
 .brand{ display:flex; align-items:center; gap:12px; font-family:'Cinzel',serif; letter-spacing:3px; font-size:13px; font-weight:600; color:var(--ink); text-decoration:none; }
-.brand img{ width:32px; height:32px; border-radius:50%; border:1px solid var(--gold); }
+.brand img{ width:32px; height:32px; border-radius:50%; border:1px solid var(--gold); object-fit:cover; }
 .nav-links{ display:flex; align-items:center; gap:44px; }
 .nav-links a{ position:relative; text-decoration:none; color:var(--muted); font-size:12.5px; letter-spacing:1.5px; text-transform:uppercase; padding:4px 0; }
 .nav-links a:not(.nav-cta)::after{ content:''; position:absolute; left:0; bottom:-2px; width:0; height:1px; background:var(--gold-light); transition:width .35s var(--ease-soft); }
@@ -151,6 +151,20 @@ header.nav.solid{ padding:14px 6vw; background:#07060ae6; backdrop-filter:blur(1
 /* ── Hero ── */
 .hero{ position:relative; min-height:100svh; display:flex; align-items:flex-end; overflow:hidden; }
 #hero-canvas{ position:absolute; inset:0; width:100%; height:100%; z-index:0; }
+/* Shown instead of the canvas when WebGL is unavailable or the Three.js
+   scene fails to load (blocked CDN, unsupported browser, runtime error) —
+   never leave the hero blank. */
+.hero-fallback{ position:absolute; inset:0; z-index:0; display:none; align-items:center; justify-content:center; }
+.hero-fallback.show{ display:flex; }
+.hero-fallback .fallback-cross{
+  font-size:min(34vw,320px); line-height:1; font-family:'Cinzel',serif;
+  background:linear-gradient(180deg,var(--gold-light) 0%,var(--gold) 55%,var(--gold-dim) 100%);
+  -webkit-background-clip:text; background-clip:text; color:transparent;
+  filter:drop-shadow(0 0 40px #FFE3A355) drop-shadow(0 0 90px #C9A84C33);
+  animation:fallbackfloat 6s ease-in-out infinite;
+}
+@keyframes fallbackfloat{ 0%,100%{ transform:translateY(0); } 50%{ transform:translateY(-14px); } }
+@media (prefers-reduced-motion: reduce){ .hero-fallback .fallback-cross{ animation:none; } }
 .hero-rays{ position:absolute; inset:-30% -30% -30% -30%; z-index:1; pointer-events:none; opacity:.35; mix-blend-mode:screen;
   background:conic-gradient(from 200deg at 72% 28%, transparent 0deg, #FFE3A344 8deg, transparent 22deg, transparent 40deg, #FFE3A333 50deg, transparent 66deg, transparent 100deg, #FFE3A322 112deg, transparent 130deg, transparent 360deg);
   animation:rayspin 140s linear infinite;
@@ -271,7 +285,7 @@ section{ position:relative; }
 .phone .screen{ width:100%; height:100%; border-radius:34px; overflow:hidden; position:relative;
   background:radial-gradient(circle at 50% 0%, #241a10, #0c0906 70%); padding:22px; display:flex; flex-direction:column; gap:14px; }
 .mock-topbar{ display:flex; justify-content:space-between; align-items:center; }
-.mock-topbar img{ width:30px; height:30px; border-radius:50%; border:1px solid var(--gold); }
+.mock-topbar img{ width:30px; height:30px; border-radius:50%; border:1px solid var(--gold); object-fit:cover; }
 .mock-topbar .dots{ display:flex; gap:4px; }
 .mock-topbar .dots span{ width:4px; height:4px; border-radius:50%; background:#EFD48F55; }
 .mock-card{ border-radius:16px; border:1px solid #EFD48F26; background:#ffffff06; padding:14px; }
@@ -288,27 +302,14 @@ section{ position:relative; }
 .preview-list li{ display:flex; align-items:flex-start; gap:14px; color:var(--ink); font-size:14.5px; opacity:0; transform:translateX(-16px); }
 .preview-list li .num{ font-family:'Cinzel',serif; color:var(--gold); font-size:13px; border:1px solid var(--line); width:26px; height:26px; border-radius:50%; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
 
-/* ── Sacred icons ── */
-.icon-grid{ display:grid; grid-template-columns:1fr 1fr; gap:50px; max-width:760px; margin:0 auto; }
-@media (max-width:760px){ .icon-grid{ grid-template-columns:1fr; max-width:340px; gap:44px; } }
-.icon-card{ text-align:center; perspective:1200px; }
-.icon-frame{
-  position:relative; aspect-ratio:3/4; border-radius:20px; overflow:hidden;
-  border:1.5px solid var(--gold); background:linear-gradient(160deg,#ffffff14,#00000038);
-  box-shadow:0 30px 70px -20px #000a, 0 0 44px #D9B56322; margin-bottom:22px;
-}
-.icon-frame img{ width:100%; height:100%; object-fit:cover; position:relative; z-index:2; }
-.icon-placeholder{ position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; z-index:1; }
-.icon-mark{ font-size:42px; color:var(--gold-light); opacity:.5; }
-.icon-label{ font-size:22px; color:var(--gold-light); }
-.icon-sub{ font-size:9.5px; letter-spacing:2.5px; text-transform:uppercase; color:var(--muted-2); }
-.icon-sweep{ position:absolute; inset:-60% -20%; z-index:3; pointer-events:none;
-  background:linear-gradient(115deg, transparent 42%, #FFE3A340 50%, transparent 58%);
-  animation:iconsweep 5.5s ease-in-out infinite; }
-@keyframes iconsweep{ 0%,100%{ transform:translateX(-55%); } 50%{ transform:translateX(55%); } }
-.icon-card h3{ font-size:1.05rem; color:#fff; margin:0; font-family:'Inter',sans-serif; font-weight:600; }
-.icon-card h3 .am{ display:block; color:var(--gold-light); font-size:.78em; margin-top:5px; font-weight:500; }
-@media (prefers-reduced-motion: reduce){ .icon-sweep{ animation:none; } }
+/* ── About ── */
+.about-grid{ display:grid; grid-template-columns:1.15fr .85fr; gap:70px; align-items:start; }
+@media (max-width:900px){ .about-grid{ grid-template-columns:1fr; gap:44px; } }
+.about-copy p{ color:var(--muted); line-height:1.9; font-size:15.5px; margin:0 0 20px; max-width:520px; }
+.about-quote{ border-left:2px solid var(--gold); padding:4px 0 4px 22px; margin:34px 0 0; color:var(--gold-light);
+  font-family:'Cinzel',serif; font-size:1.05rem; line-height:1.6; max-width:480px; }
+.about-panel{ border:1px solid var(--line); border-radius:20px; background:var(--glass); padding:36px 34px; }
+.about-panel h3{ margin:0 0 24px; font-size:12px; letter-spacing:2.5px; text-transform:uppercase; color:var(--gold); }
 
 /* ── Support ── */
 .support{ text-align:center; padding:150px 6vw; position:relative; background:
@@ -352,11 +353,11 @@ footer{ border-top:1px solid var(--line); padding:70px 6vw 40px; }
 <div class="cursor-dot" id="cursorDot"></div>
 
 <header class="nav" id="siteNav">
-  <a class="brand" href="#hero"><img src="logo.png" alt="Yenefs Abat logo">YENEFS ABAT</a>
+  <a class="brand" href="#hero"><img src="logo-64.png" width="32" height="32" alt="Yenefs Abat logo" fetchpriority="high">YENEFS ABAT</a>
   <div class="nav-links">
     <a href="#features">Features</a>
     <a href="#preview">The App</a>
-    <a href="#icons">Icons</a>
+    <a href="#about">About</a>
     <a href="#support">Support</a>
     <a class="nav-cta magnetic" href="#hero" id="nav-download">Get the App</a>
   </div>
@@ -366,13 +367,14 @@ footer{ border-top:1px solid var(--line); padding:70px 6vw 40px; }
 <div class="mobile-menu" id="mobileMenu">
   <a href="#features">Features</a>
   <a href="#preview">The App</a>
-  <a href="#icons">Icons</a>
+  <a href="#about">About</a>
   <a href="#support">Support</a>
   <a href="#hero" id="mob-download">Get the App</a>
 </div>
 
 <section class="hero" id="hero">
   <canvas id="hero-canvas"></canvas>
+  <div class="hero-fallback" id="hero-fallback" aria-hidden="true"><div class="fallback-cross">☩</div></div>
   <div class="hero-rays"></div>
   <svg class="wing left" width="140" height="120" viewBox="0 0 140 120" style="top:14%;left:2%;" aria-hidden="true"><path d="M4 90 Q 30 20 70 8 Q 55 35 60 55 Q 40 40 30 60 Q 48 55 55 72 Q 32 68 20 85 Q 40 82 45 95 Q 20 100 4 90Z" fill="currentColor" fill-opacity=".12" stroke="currentColor" stroke-width="1"/></svg>
   <svg class="wing" width="140" height="120" viewBox="0 0 140 120" style="top:10%;right:3%;" aria-hidden="true"><path d="M4 90 Q 30 20 70 8 Q 55 35 60 55 Q 40 40 30 60 Q 48 55 55 72 Q 32 68 20 85 Q 40 82 45 95 Q 20 100 4 90Z" fill="currentColor" fill-opacity=".12" stroke="currentColor" stroke-width="1"/></svg>
@@ -439,7 +441,7 @@ footer{ border-top:1px solid var(--line); padding:70px 6vw 40px; }
       <div class="phone-chip chip-3">📅</div>
       <div class="phone">
         <div class="screen">
-          <div class="mock-topbar"><img src="logo.png" alt=""><div class="dots"><span></span><span></span><span></span></div></div>
+          <div class="mock-topbar"><img src="logo-64.png" width="30" height="30" alt="" loading="lazy"><div class="dots"><span></span><span></span><span></span></div></div>
           <div class="mock-card"><div class="lbl">Fasting Streak</div><div class="big">14</div><div class="sm">Best · 30 days</div></div>
           <div class="mock-card"><div class="lbl">Verse of the Day</div><div class="sm" style="color:#E8D9B8;">&ldquo;I can do all things through Christ.&rdquo;</div></div>
           <div class="mock-row"><span>✝️</span><span>🔔</span><span>📅</span><span>⛪</span></div>
@@ -461,41 +463,29 @@ footer{ border-top:1px solid var(--line); padding:70px 6vw 40px; }
   </div>
 </section>
 
-<section class="section-pad icons-section" id="icons">
+<section class="section-pad" id="about">
   <div class="wrap">
     <div class="section-head">
       <div>
-        <div class="eyebrow reveal">Icons of the Faith</div>
-        <h2 class="section-title reveal">Held in sacred memory<span class="am">በቅዱስ መታሰቢያ የተያዘ</span></h2>
+        <div class="eyebrow reveal">Our Story</div>
+        <h2 class="section-title reveal">More than an app, a companion for the faithful<span class="am">ከመተግበሪያ በላይ — ለምዕመናን አጋር</span></h2>
       </div>
-      <p class="section-note reveal">Two icons at the heart of the Ethiopian Orthodox Tewahedo tradition, framed here and waiting for their true images.</p>
+      <p class="section-note reveal">Built quietly, tested prayerfully, and shaped by the community it serves.</p>
     </div>
-    <div class="icon-grid">
-      <div class="icon-card reveal">
-        <div class="icon-frame">
-          <div class="icon-sweep"></div>
-          <div class="icon-placeholder">
-            <span class="icon-mark">☩</span>
-            <span class="icon-label am">ሥላሴ</span>
-            <span class="icon-sub">Icon pending</span>
-          </div>
-          <!-- Drop the real icon at public/icons/trinity.jpg and it takes over automatically -->
-          <img src="icons/trinity.jpg" alt="Icon of the Holy Trinity" loading="lazy" onerror="this.style.display='none'">
-        </div>
-        <h3>The Holy Trinity<span class="am">ቅድስት ሥላሴ</span></h3>
+    <div class="about-grid">
+      <div class="about-copy">
+        <p class="reveal">Yenefs Abat — &ldquo;የነፍስ አባት,&rdquo; Father of the Soul — began with a simple longing: to carry the rhythm of the Ethiopian Orthodox Tewahedo Church into daily, modern life. Between work, travel, and the noise of a phone, it is easy to lose track of a fast, a feast day, or the hour of prayer. This app exists to gently hold that rhythm for you.</p>
+        <p class="reveal">It was never meant to replace the Church, the priest, or the sacraments — only to point you back to them. Every feature, from the confession guide to the daily Synaxarium, was shaped with care in both Amharic and English, so that language is never a barrier to the faith.</p>
+        <p class="about-quote reveal">Built by the community, for the community — kept free, and kept faithful.</p>
       </div>
-      <div class="icon-card reveal">
-        <div class="icon-frame">
-          <div class="icon-sweep"></div>
-          <div class="icon-placeholder">
-            <span class="icon-mark">☩</span>
-            <span class="icon-label am">እመቤታችን</span>
-            <span class="icon-sub">Icon pending</span>
-          </div>
-          <!-- Drop the real icon at public/icons/theotokos.jpg and it takes over automatically -->
-          <img src="icons/theotokos.jpg" alt="Icon of the Theotokos, the Virgin Mary" loading="lazy" onerror="this.style.display='none'">
-        </div>
-        <h3>The Theotokos<span class="am">እመቤታችን ማርያም</span></h3>
+      <div class="about-panel reveal">
+        <h3>Why Yenefs Abat</h3>
+        <ul class="preview-list" id="aboutList">
+          <li><span class="num">01</span>Rooted in the Tewahedo tradition — every fast and feast follows the true Ethiopian calendar</li>
+          <li><span class="num">02</span>Bilingual by design, Amharic and English side by side</li>
+          <li><span class="num">03</span>Kept free for the community, sustained by those it serves</li>
+          <li><span class="num">04</span>Refined continuously, guided by the people who use it every day</li>
+        </ul>
       </div>
     </div>
   </div>
@@ -529,12 +519,45 @@ footer{ border-top:1px solid var(--line); padding:70px 6vw 40px; }
   </div>
 </footer>
 
-<!-- ══════════ Three.js hero scene ══════════ -->
-<script type="importmap">
-{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+<!-- ══════════ Three.js hero scene, with a graceful CSS fallback ══════════ -->
+<script>
+// Check WebGL support before even attempting to load Three.js — no point
+// fetching a 3D library over a CDN a browser can't render anything with.
+(function () {
+  function hasWebGL() {
+    try {
+      var c = document.createElement('canvas');
+      return !!(window.WebGLRenderingContext && (c.getContext('webgl') || c.getContext('experimental-webgl')));
+    } catch (e) { return false; }
+  }
+  window.__heroWebglOk = hasWebGL();
+  if (!window.__heroWebglOk) {
+    document.getElementById('hero-canvas').style.display = 'none';
+    document.getElementById('hero-fallback').classList.add('show');
+  }
+})();
 </script>
 <script type="module">
-import * as THREE from 'three';
+// Everything below is wrapped in a try/catch around a *dynamic* import —
+// a static `import … from 'three'` would throw before any of our code
+// runs if the CDN is blocked/unreachable, which can't be caught. A failed
+// dynamic import() is a normal rejected promise instead, so a blocked CDN,
+// an unsupported browser, or any runtime error in scene setup all fall
+// through to the same static CSS cross instead of leaving the hero blank.
+(async function () {
+  if (!window.__heroWebglOk) return; // fallback already shown above
+
+  let THREE;
+  try {
+    THREE = await import('https://unpkg.com/three@0.160.0/build/three.module.js');
+  } catch (err) {
+    console.error('Hero 3D scene: three.js failed to load, showing static fallback.', err);
+    document.getElementById('hero-canvas').style.display = 'none';
+    document.getElementById('hero-fallback').classList.add('show');
+    return;
+  }
+
+  try {
 
 const canvas = document.getElementById('hero-canvas');
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -748,6 +771,13 @@ if (reduceMotion) {
 } else {
   animate();
 }
+
+  } catch (err) {
+    console.error('Hero 3D scene: setup failed, showing static fallback.', err);
+    document.getElementById('hero-canvas').style.display = 'none';
+    document.getElementById('hero-fallback').classList.add('show');
+  }
+})();
 </script>
 
 <!-- ══════════ GSAP scroll + interaction ══════════ -->
@@ -881,6 +911,12 @@ if (reduceMotion) {
     scrollTrigger: { trigger: '#previewList', start: 'top 88%' },
   });
 
+  // ── About list ──
+  gsap.to('#aboutList li', {
+    opacity: 1, x: 0, duration: 0.7, stagger: 0.1, ease: 'power2.out',
+    scrollTrigger: { trigger: '#aboutList', start: 'top 88%' },
+  });
+
   // ── Phone parallax chips ──
   if (fineHover && !reduceMotion) {
     var stage = document.querySelector('.phone-stage');
@@ -901,21 +937,6 @@ if (reduceMotion) {
     }
   }
 
-  // ── Sacred icon frames — 3D tilt toward the cursor ──
-  if (fineHover && !reduceMotion) {
-    document.querySelectorAll('.icon-frame').forEach(function (frame) {
-      var rx = gsap.quickTo(frame, 'rotationX', { duration: 0.5, ease: 'power2.out' });
-      var ry = gsap.quickTo(frame, 'rotationY', { duration: 0.5, ease: 'power2.out' });
-      frame.addEventListener('mousemove', function (e) {
-        var r = frame.getBoundingClientRect();
-        var px = (e.clientX - r.left) / r.width - 0.5;
-        var py = (e.clientY - r.top) / r.height - 0.5;
-        rx(-py * 12);
-        ry(px * 12);
-      });
-      frame.addEventListener('mouseleave', function () { rx(0); ry(0); });
-    });
-  }
 
   // ── Marquee (paused on reduced motion) ──
   if (!reduceMotion) {

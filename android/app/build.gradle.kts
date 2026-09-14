@@ -31,6 +31,13 @@ android {
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName("debug")
+            // AGP 8+ enables R8 minification by default for release builds
+            // whether or not this is set — made explicit here so it's a
+            // deliberate choice, paired with proguard-rules.pro (needed by
+            // flutter_local_notifications' Gson-based persistence, see
+            // that file for why).
+            isMinifyEnabled = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
 }
