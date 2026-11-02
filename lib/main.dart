@@ -7098,18 +7098,37 @@ class _PriestScreenState extends State<PriestScreen> with TickerProviderStateMix
               },
             ),
             children: [
-              // Base tiles per style (original styling via open tile providers)
+              // Base tiles per style — free OpenStreetMap tiles (no API key).
+              // CARTO's basemaps.cartocdn.com tiles started requiring a key;
+              // OSM's own tile server needs none. Dark mode reuses the same
+              // OSM tiles under a ColorFiltered invert matrix rather than a
+              // separate dark tile source (OpenFreeMap's hosted style was
+              // tried and confirmed 404ing for raster XYZ requests — it only
+              // serves vector/MapLibre tiles, not plain PNGs).
               if (_style == 0)
-                TileLayer(
-                  urlTemplate: dark
-                      ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-                      : 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-                  subdomains: const ['a', 'b', 'c', 'd'],
-                  retinaMode: RetinaMode.isHighDensity(context),
-                  keepBuffer: 6,
-                  panBuffer: 2,
-                  userAgentPackageName: 'com.yenefsabat.yenefs_abat',
-                ),
+                dark
+                    ? ColorFiltered(
+                        colorFilter: const ColorFilter.matrix(<double>[
+                          -1, 0, 0, 0, 255,
+                          0, -1, 0, 0, 255,
+                          0, 0, -1, 0, 255,
+                          0, 0, 0, 1, 0,
+                        ]),
+                        child: TileLayer(
+                          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                          subdomains: const [],
+                          keepBuffer: 6,
+                          panBuffer: 2,
+                          userAgentPackageName: 'com.yenefsabat.yenefs_abat',
+                        ),
+                      )
+                    : TileLayer(
+                        urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                        subdomains: const [],
+                        keepBuffer: 6,
+                        panBuffer: 2,
+                        userAgentPackageName: 'com.yenefsabat.yenefs_abat',
+                      ),
               if (_style == 1 || _style == 2)
                 TileLayer(
                   urlTemplate: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
@@ -7117,15 +7136,13 @@ class _PriestScreenState extends State<PriestScreen> with TickerProviderStateMix
                   panBuffer: 2,
                   userAgentPackageName: 'com.yenefsabat.yenefs_abat',
                 ),
-              if (_style == 2)
-                TileLayer(
-                  urlTemplate: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}{r}.png',
-                  subdomains: const ['a', 'b', 'c', 'd'],
-                  retinaMode: RetinaMode.isHighDensity(context),
-                  keepBuffer: 6,
-                  panBuffer: 2,
-                  userAgentPackageName: 'com.yenefsabat.yenefs_abat',
-                ),
+              // Hybrid (style 2) used to overlay a CARTO "labels only" tile
+              // on top of the satellite imagery. That overlay is removed
+              // rather than swapped for OSM tiles — OSM's basemap isn't a
+              // labels-only layer, so stacking it here would paint an
+              // opaque street map over the satellite imagery instead of
+              // just place names. The imagery alone still gives enough
+              // context, matching Satellite style.
               if (_style == 3)
                 TileLayer(
                   urlTemplate: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
@@ -7466,7 +7483,7 @@ class _PriestScreenState extends State<PriestScreen> with TickerProviderStateMix
               ]),
             ),
             const SizedBox(height: 4),
-            Text('© OpenStreetMap · CARTO · Esri',
+            Text('© OpenStreetMap contributors · Esri',
               style: TextStyle(fontSize: 8.5, color: (dark ? Colors.white : Colors.black).withAlpha(110))),
           ]),
         ),
