@@ -22,8 +22,6 @@ import 'dart:ui' as ui;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tzdata;
 
-const String googleApiKey = 'AIzaSyA-X9y5ouviMuzRZ0xGIrKpst5m0XpF2F8';
-
 // ── EmailJS (free) — for sending real verification codes by email ──
 // Create a free account at https://www.emailjs.com then fill these in:
 const String emailjsServiceId = 'service_b0dal6k';
@@ -31,22 +29,20 @@ const String emailjsTemplateId = 'template_2wygczm';
 const String emailjsPublicKey = 'f3q9dbEr5J5aicm4M';
 
 // ── AI Assistant (የነፍስ አባት አማካሪ) — Google Gemini API key. ──────────────
-// ⚠️ SECURITY: this key is embedded directly in the compiled APK. Anyone
-// can extract it by decompiling the app (this is true of ANY client-side
-// API key, not a Flutter-specific weakness). Before a PUBLIC release:
-//   1. Do NOT commit a real key to a public git remote — check your
-//      repo's visibility (Settings → General → Danger Zone on GitHub)
-//      before pushing a commit that contains one.
-//   2. Move the actual Gemini call server-side into a Firebase Cloud
-//      Function that the app calls instead (the app sends the user's
-//      question + Firebase Auth ID token; the function holds the real key
-//      and enforces rate limits itself). Because every Gemini call in this
-//      file goes through GeminiService below, that migration is a
-//      one-file change: swap GeminiService.ask()'s HTTP target.
-// Leave this empty to disable the feature gracefully (the chat screen
-// shows a "not configured yet" message instead of any network call).
+// Supplied at build/run time via --dart-define, never hardcoded in source
+// (this repo is public — a hardcoded key would be exposed the moment it's
+// committed). Empty by default, which disables the feature gracefully (the
+// chat screen shows a "not configured yet" message instead of any network
+// call) rather than crashing. Run with:
+//   flutter run --dart-define=GEMINI_API_KEY=your-key-here
+// Before a PUBLIC release, also consider moving the actual Gemini call
+// server-side into a Firebase Cloud Function (the app would send the
+// user's question + Firebase Auth ID token; the function holds the real
+// key and enforces rate limits itself) — since every Gemini call in this
+// file goes through GeminiService below, that migration is a one-file
+// change: swap GeminiService.ask()'s HTTP target.
 // ignore: constant_identifier_names
-const String GEMINI_API_KEY = 'AQ.Ab8RN6JJHjF4guB3FbZGB2oZU718ehr26jrZwyPFTgPZ47x1XQ';
+const String GEMINI_API_KEY = String.fromEnvironment('GEMINI_API_KEY');
 
 const String aiSystemPrompt =
     'You are a humble, reverent assistant for the Ethiopian Orthodox '
