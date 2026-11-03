@@ -56,6 +56,44 @@ const String aiSystemPrompt =
     'present yourself as a replacement for a priest. Keep answers concise '
     'and warm.';
 
+// ── Tree-shaking-safe icon pickers ──────────────────────────────────────
+// Release builds' icon tree-shaker (ConstFinder) needs every icon to be
+// traceable to a literal Icons.* constant. It does NOT reliably resolve a
+// ternary written directly inside an Icon(...) call (`cond ? Icons.a :
+// Icons.b`), nor indexed access into a list/map — both broke
+// `flutter build apk --release` with "IconTreeShakerException: ConstFinder
+// failure". A small function with a switch returning literal Icons.*
+// constants per case is the pattern it DOES trace, so every
+// conditionally-chosen icon in this file goes through one of these
+// instead of an inline ternary.
+IconData _visibilityIcon(bool visible) {
+  switch (visible) {
+    case true: return Icons.visibility_off_outlined;
+    default: return Icons.visibility_outlined;
+  }
+}
+
+IconData _alarmIcon(bool isSet) {
+  switch (isSet) {
+    case true: return Icons.alarm_on;
+    default: return Icons.alarm_add;
+  }
+}
+
+IconData _reminderIcon(bool enabled) {
+  switch (enabled) {
+    case true: return Icons.notifications_active;
+    default: return Icons.notifications_none;
+  }
+}
+
+IconData _favIcon(bool isFav) {
+  switch (isFav) {
+    case true: return Icons.star_rounded;
+    default: return Icons.star_outline_rounded;
+  }
+}
+
 Future<bool> sendEmailCode(String toEmail, String code, String purpose) async {
   if (emailjsServiceId.isEmpty || emailjsTemplateId.isEmpty || emailjsPublicKey.isEmpty) {
     return false; // not configured yet → caller falls back to on-screen code
@@ -1733,7 +1771,7 @@ class _SignInScreenState extends State<SignInScreen> {
       focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: c.gold, width: 1.5)),
       suffixIcon: GestureDetector(
         onTap: () => onToggle(!visible),
-        child: Icon(visible ? Icons.visibility_off_outlined : Icons.visibility_outlined, color: c.muted, size: 20),
+        child: Icon(_visibilityIcon(visible), color: c.muted, size: 20),
       ),
     ),
   );
@@ -2727,7 +2765,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                     border: Border.all(color: time.isNotEmpty ? c.gold : c.border, width: 0.5),
                   ),
                   child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(time.isNotEmpty ? Icons.alarm_on : Icons.alarm_add,
+                    Icon(_alarmIcon(time.isNotEmpty),
                         color: time.isNotEmpty ? c.gold : c.muted, size: 14),
                     const SizedBox(width: 6),
                     Text(time.isNotEmpty ? time : 'Set Time',
@@ -3613,7 +3651,7 @@ class _PenanceScreenState extends State<PenanceScreen> {
                                         border: item.reminderEnabled ? Border.all(color: c.gold, width: 0.5) : null,
                                       ),
                                       child: Row(mainAxisSize: MainAxisSize.min, children: [
-                                        Icon(item.reminderEnabled ? Icons.notifications_active : Icons.notifications_none,
+                                        Icon(_reminderIcon(item.reminderEnabled),
                                             color: item.reminderEnabled ? c.gold : c.muted, size: 12),
                                         if (item.reminderEnabled) ...[
                                           const SizedBox(width: 4),
@@ -7659,7 +7697,7 @@ class _PriestScreenState extends State<PriestScreen> with TickerProviderStateMix
                         shape: BoxShape.circle,
                       ),
                       child: Icon(
-                        _isFav(_sel!) ? Icons.star_rounded : Icons.star_outline_rounded,
+                        _favIcon(_isFav(_sel!)),
                         color: _isFav(_sel!) ? _gold : muted, size: 22),
                     ),
                   ),
