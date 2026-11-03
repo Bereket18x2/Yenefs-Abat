@@ -2031,6 +2031,21 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   int _idx = 0;
+
+  // See the comment above `items` in build() for why this exists instead
+  // of Icon(items[i]['icon']).
+  IconData _navIcon(int i) {
+    switch (i) {
+      case 0: return Icons.home_outlined;
+      case 1: return Icons.church_outlined;
+      case 2: return Icons.calendar_month_outlined;
+      case 3: return Icons.self_improvement_outlined;
+      case 4: return Icons.auto_stories_outlined;
+      case 5: return Icons.location_on_outlined;
+      default: return Icons.more_horiz;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = AppColors(widget.isDark);
@@ -2052,6 +2067,14 @@ class _MainScreenState extends State<MainScreen> {
       {'icon': Icons.location_on_outlined, 'label': 'CHURCH'},
       {'icon': Icons.more_horiz, 'label': 'MORE'},
     ];
+    // Icon(items[i]['icon']) used to read the IconData out of a runtime Map
+    // lookup — release builds' icon tree-shaker (ConstFinder) can never
+    // resolve that to a literal icon, which is what broke `flutter build
+    // apk --release` with "IconTreeShakerException: ConstFinder failure".
+    // A switch returning literal Icons.* constants is the pattern
+    // ConstFinder can actually trace, so the icon for each tab comes from
+    // _navIcon(i) below instead; `items` still supplies the label text,
+    // which isn't subject to tree-shaking.
     return Scaffold(
       body: Stack(children: [
         screens[_idx],
@@ -2084,7 +2107,7 @@ class _MainScreenState extends State<MainScreen> {
                       border: active ? Border.all(color: c.gold.withAlpha(80), width: 0.5) : null,
                     ),
                     child: Column(mainAxisSize: MainAxisSize.min, children: [
-                      Icon(items[i]['icon'] as IconData, color: active ? c.gold : c.muted, size: 20),
+                      Icon(_navIcon(i), color: active ? c.gold : c.muted, size: 20),
                       const SizedBox(height: 3),
                       Text(items[i]['label'] as String,
                           textScaler: TextScaler.noScaling,
