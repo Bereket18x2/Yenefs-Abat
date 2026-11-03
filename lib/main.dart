@@ -6476,6 +6476,19 @@ class _PriestScreenState extends State<PriestScreen> with TickerProviderStateMix
   static const LatLng _addis = LatLng(9.0227, 38.7468);
   static const Color _gold = Color(0xFFC9A84C);
 
+  // A switch returning literal Icons.* constants, not a const-list index —
+  // release builds' icon tree-shaker (ConstFinder) can fail to resolve
+  // indexed access into a list even when the list itself is const,
+  // especially inside a closure, which is what this replaced.
+  IconData _mapStyleIcon(int i) {
+    switch (i) {
+      case 0: return Icons.map_rounded;
+      case 1: return Icons.satellite_alt_rounded;
+      case 2: return Icons.layers_rounded;
+      default: return Icons.terrain_rounded;
+    }
+  }
+
   final MapController _map = MapController();
   final TextEditingController _searchCtrl = TextEditingController();
   final FocusNode _searchFocus = FocusNode();
@@ -7784,7 +7797,6 @@ class _PriestScreenState extends State<PriestScreen> with TickerProviderStateMix
               const SizedBox(height: 14),
               Row(children: List.generate(4, (i) {
                 const names = ['Standard', 'Satellite', 'Hybrid', 'Terrain'];
-                const icons = [Icons.map_rounded, Icons.satellite_alt_rounded, Icons.layers_rounded, Icons.terrain_rounded];
                 final active = _style == i;
                 return Expanded(child: Padding(
                   padding: EdgeInsets.only(right: i < 3 ? 10 : 0),
@@ -7799,7 +7811,7 @@ class _PriestScreenState extends State<PriestScreen> with TickerProviderStateMix
                         border: Border.all(color: active ? _gold : onGlass.withAlpha(35), width: active ? 1.6 : 0.7),
                       ),
                       child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                        Icon(icons[i], size: 24, color: active ? Colors.white : onGlass),
+                        Icon(_mapStyleIcon(i), size: 24, color: active ? Colors.white : onGlass),
                         const SizedBox(height: 6),
                         Text(names[i], style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700,
                           color: active ? Colors.white : onGlass)),
